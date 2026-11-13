@@ -342,6 +342,7 @@ pub use text::FontSmoothing;
 pub use text::Icon;
 pub use text::Link;
 pub use text::LinkPaint;
+pub use text::ParagraphStyle;
 pub use text::SmoothingSupport;
 pub use text::Span;
 pub use text::TextCase;

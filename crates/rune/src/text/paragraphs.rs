@@ -114,8 +114,10 @@ pub(crate) struct Paragraph {
     /// Its layout's width and full width, so a later edit that keeps it reads neither from it.
     widths: [f32; 2],
     pub(crate) flow: Flow,
+    /// Where it starts with no words, from its start edge: its [`ParagraphStyle`]'s indent.
+    start_x: f32,
     /// What its layout depends on but the width: its words, their shaping spans, its pills,
-    /// block and direction, in the field's style.
+    /// block, direction and [`ParagraphStyle`], in the field's style.
     key: u64,
     /// Its pills' labels, as bytes from its start, each shaped between FSI and PDI.
     isolates: Box<[(u32, u32)]>,
@@ -143,17 +145,18 @@ pub(crate) struct Piece<'a> {
     pub(crate) flow: Flow,
     /// Its paragraph's index in the field, for its [`Block`].
     pub(crate) index: usize,
+    start_x: f32,
     isolates: &'a [(u32, u32)],
     whole: bool,
 }
 
 impl<'a> Piece<'a> {
     fn of_paragraph(k: usize, p: &'a Paragraph) -> Piece<'a> {
-        Piece { layout: &p.layout, shared: Some(&p.layout), start: p.start, end: p.end, y: p.y, height: p.height, flow: p.flow, index: k, isolates: &p.isolates, whole: false }
+        Piece { layout: &p.layout, shared: Some(&p.layout), start: p.start, end: p.end, y: p.y, height: p.height, flow: p.flow, index: k, start_x: p.start_x, isolates: &p.isolates, whole: false }
     }
 
     fn whole(layout: &'a Layout<Ink>) -> Piece<'a> {
-        Piece { layout, shared: None, start: 0, end: usize::MAX, y: 0.0, height: layout.height(), flow: Flow::of_layout(layout), index: 0, isolates: &[], whole: true }
+        Piece { layout, shared: None, start: 0, end: usize::MAX, y: 0.0, height: layout.height(), flow: Flow::of_layout(layout), index: 0, start_x: 0.0, isolates: &[], whole: true }
     }
 
     /// Whether it's a text's one layout rather than a paragraph of a field's.
@@ -390,12 +393,12 @@ impl<'a> TextFlow<'a> {
         }
     }
 
-    /// Where an empty paragraph's caret, `size` px wide, starts: its right edge (the width it
-    /// wraps at) when it reads right to left, else 0.
+    /// Where an empty paragraph's caret, `size` px wide, starts: its indent from its start
+    /// edge, which is its right edge (the width it wraps at) when it reads right to left.
     fn blank_start(self, p: &Piece<'_>, size: f32) -> f32 {
         match (p.flow, self) {
-            (Flow::Rtl, TextFlow::Paragraphs(pl)) => (pl.max_width.unwrap_or(pl.width) - size).max(0.0),
-            _ => 0.0,
+            (Flow::Rtl, TextFlow::Paragraphs(pl)) => (pl.max_width.unwrap_or(pl.width) - p.start_x - size).max(0.0),
+            _ => p.start_x,
         }
     }
 
@@ -564,16 +567,19 @@ impl TextSystem {
             return TextLayout::Single(self.layout_for_spec(spec, scale, max_width, align));
         }
         let forced = spec.paragraphs_flow();
+        let styles = spec.cold.paragraph_styles.as_slice();
         // One paragraph and no pills, as most drafts are: one layout in its own direction.
-        if spec.cold.pills.is_empty() && !spec.content.contains('\n') {
+        if styles.is_empty() && spec.cold.pills.is_empty() && !spec.content.contains('\n') {
             let base = forced.or_else(|| flow_of(&spec.content, &[])).unwrap_or(spec.plaintext_flow()).base();
             let shape = spec.shape_key(scale).map(|k| hash::directed(k, base));
             let style = (&spec.content, &spec.spans, &spec.cold.blocks);
-            return TextLayout::Single(self.layout_keyed(shape, style.0, style.1, style.2, &[], spec.style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Cached, base));
+            return TextLayout::Single(self.layout_keyed(shape, style.0, style.1, style.2, &[], spec.style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Cached, base, Inset::default()));
         }
         let whole = spec.shape_key(scale).unwrap_or_else(|| spec.fresh_shape_key(scale));
         // Lines with no strong character take the element's flow, so it keys the whole too.
         let whole = if forced.unwrap_or(spec.plaintext_flow()) == Flow::Rtl { whole ^ 0x3c6e_f372_fe94_f82b } else { whole };
+        // The space above a paragraph moves those under it, so every style keys the whole.
+        let whole = if styles.is_empty() { whole } else { hash::styles_key(whole, styles) };
         let blocks = &spec.cold.blocks;
         let indented = blocks.iter().any(|&b| b != Block::Paragraph).then_some(blocks.as_slice());
         let key = hash::break_key(whole ^ PARAGRAPHS, max_width, align, indented);
@@ -615,7 +621,7 @@ impl TextSystem {
         };
         // A plain text's edit keys only the paragraphs it touched: those before it and after it
         // keep their keys (`reuse_keys`), so a keystroke costs its own paragraph, not the draft.
-        let plain = spec.spans.is_empty() && spec.cold.pills.is_empty() && spec.cold.blocks.iter().all(|&b| b == Block::Paragraph);
+        let plain = spec.spans.is_empty() && spec.cold.pills.is_empty() && spec.cold.paragraph_styles.is_empty() && spec.cold.blocks.iter().all(|&b| b == Block::Paragraph);
         let forced = spec.paragraphs_flow();
         let start_flow = forced.unwrap_or(spec.plaintext_flow());
         let reused = prev.filter(|_| plain).and_then(|p| reuse_keys(p, content, style_key, start_flow, &mut self.last_diff));
@@ -685,10 +691,12 @@ impl TextSystem {
             if let Some((height, w, lines, layout, run)) = wait {
                 waiting += 1;
                 (width, full_width) = (width.max(w), full_width.max(w));
-                paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, height, widths: [w, w], flow, key, isolates, layout, shaped: false, lines, run });
+                paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, height, widths: [w, w], flow, key, start_x: 0.0, isolates, layout, shaped: false, lines, run });
                 y += f64::from(height);
                 continue;
             }
+            let own = spec.cold.paragraph_styles.get(k).copied().unwrap_or_default();
+            let inset = own.inset(scale, shaped(&isolates, own.hung().min(b - a)));
             // The same paragraph at the other width (the same text, so the same index).
             let twin = other.and_then(|o| o.paragraphs.get(k)).filter(|o| o.key == key && o.shaped);
             // A kept paragraph broken at another width, or this text's own paragraph at the
@@ -698,7 +706,7 @@ impl TextSystem {
                 (_, Some(o)) => {
                     fresh += b - a;
                     let mut l = o.layout.clone();
-                    line_break::rebreak(Rc::make_mut(&mut l), blocks, style.size, scale, max_width, align);
+                    line_break::rebreak(Rc::make_mut(&mut l), blocks, inset, style.size, scale, max_width, align);
                     // Re-broken, in place or as a copy: the lines it draws now are new.
                     self.layout_ids.build(&l);
                     l
@@ -710,17 +718,20 @@ impl TextSystem {
                     let text: Cow<str> = if isolates.is_empty() { Cow::Borrowed(words) } else { Cow::Owned(with_isolates(words, &isolates)) };
                     let spans: Vec<Span> = spans_in(window.near(a, b), a, b, &isolates).collect();
                     let pills: Vec<PillChip> = pills_in(&spec.cold.pills, a, b, &isolates).collect();
-                    self.layout_keyed(Some(key), &text, &spans, blocks, &pills, style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Owned, flow.base())
+                    self.layout_keyed(Some(key), &text, &spans, blocks, &pills, style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Owned, flow.base(), inset)
                 }
             };
             // A paragraph kept as it was keeps its measures too: touching 2,000 layouts to read
             // them again costs more than the edit.
+            let line = if inset.line_height > 0.0 { inset.line_height * scale } else { line };
             let (height, widths) = match (kept, again) {
                 (Some(o), None) => (o.height, o.widths),
                 _ => (if a == b { layout.height().max(line) } else { layout.height() }, [layout.width(), layout.full_width()]),
             };
             (width, full_width) = (width.max(widths[0]), full_width.max(widths[1]));
-            paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, height, widths, flow, key, isolates, layout, shaped: true, lines: 1, run: false });
+            y += f64::from(own.space_px(scale));
+            let start_x = (inset.indent + inset.first).max(0.0);
+            paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, height, widths, flow, start_x, key, isolates, layout, shaped: true, lines: 1, run: false });
             y += f64::from(height);
         }
         let (asc, desc) = self.primary_extents(style.family, style.weight, style.italic).unwrap_or((0.8, 0.2));
@@ -837,6 +848,9 @@ fn key_paragraphs(spec: &TextSpec, style_key: u64, a: usize, z: usize, start_flo
         let flow = forced.or_else(|| flow_of(words, &isolates)).unwrap_or(last_flow);
         let mut h = hash::KeyHasher::default();
         (words, style_key, flow == Flow::Rtl, spec.cold.blocks.get(k).copied().unwrap_or(Block::Paragraph)).hash(&mut h);
+        if let Some(s) = spec.cold.paragraph_styles.get(k) {
+            s.layout_bits().hash(&mut h);
+        }
         for s in spans_in(window.near(a, b), a, b, &isolates) {
             (s.start, s.end, s.mono, s.weight.map(f32::to_bits), s.size.map(f32::to_bits), s.italic).hash(&mut h);
         }

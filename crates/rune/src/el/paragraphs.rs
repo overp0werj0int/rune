@@ -1,8 +1,41 @@
 //! `El::dir_by_paragraph`: each paragraph of a text in the direction of its own words, as CSS's
 //! `unicode-bidi: plaintext` lays a block's paragraphs out.
 use super::*;
+use crate::ParagraphStyle;
 
 impl El {
+    /// Lays a multi-line [`text_input`] out with paragraph `k` (a line a newline ends) in
+    /// `styles[k]`: its indent, a first line that starts early or late or hangs its first bytes
+    /// before the indent, its own line height and the room above it. A paragraph past the
+    /// list's end lays out as it would without one. The caret, a selection, a press and the
+    /// IME's caret all follow where the lines land, and an empty paragraph's caret stands at
+    /// its indent.
+    ///
+    /// It is layout, like [`El::spans`]: pass it on every build, from the text as it is. It's
+    /// no part of [`TextEdit`] or its undo history, so undoing an edit leaves no style behind.
+    /// A paragraph whose words, shaping spans and style are unchanged keeps its layout across
+    /// an edit elsewhere.
+    ///
+    /// The field lays out by paragraph, as with [`El::dir_by_paragraph`], which this turns on.
+    /// A one-line, secure or line-clamped field, and a text that isn't a field, ignore it.
+    pub fn paragraph_styles(mut self, styles: impl Into<Vec<ParagraphStyle>>) -> El {
+        let Some(inp) = self.cold.get_mut_if_some().and_then(|c| c.input.as_deref()) else { return self };
+        let mut styles = styles.into();
+        // A preedit typed inside a paragraph's hung bytes hangs with them.
+        if let Some((preedit, _)) = inp.edit.preedit() {
+            let at = inp.edit.range().0;
+            let text = &inp.edit.text;
+            let k = text.as_bytes()[..at.min(text.len())].iter().filter(|&&b| b == b'\n').count();
+            let start = text[..at.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+            if let Some(s) = styles.get_mut(k).filter(|s| at - start < s.hung()) {
+                *s = s.hang_more(preedit.len());
+            }
+        }
+        let Some(t) = self.text.as_mut() else { return self };
+        t.cold.paragraph_styles = styles;
+        self.dir_by_paragraph()
+    }
+
     /// Lays each paragraph of this text (a line a newline ends) out in the direction of its own
     /// first strong character, as CSS's `unicode-bidi: plaintext` does: right to left when that's
     /// Arabic or Hebrew, else left to right, left to right too when it has none, whatever

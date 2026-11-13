@@ -123,6 +123,8 @@ pub(crate) struct TextCold {
     pub(crate) highlights: Vec<crate::text::TextHighlight>,
     /// Per-paragraph [`Block`](crate::Block) attributes for `content`.
     pub(crate) blocks: Vec<crate::edit::Block>,
+    /// See [`El::paragraph_styles`](crate::El::paragraph_styles): one per paragraph of `content`.
+    pub(crate) paragraph_styles: Vec<crate::ParagraphStyle>,
     /// Line indices (`> 0`) created by `Shift+Return` (`<br>`).
     pub(crate) soft_breaks: Vec<u32>,
     /// [`Mark::Pill`](crate::Mark::Pill) chips in `content`, sorted.
@@ -153,6 +155,7 @@ impl Empty for TextCold {
         strikes: Vec::new(),
         highlights: Vec::new(),
         blocks: Vec::new(),
+        paragraph_styles: Vec::new(),
         soft_breaks: Vec::new(),
         pills: Vec::new(),
         isolates: Vec::new(),
@@ -365,6 +368,7 @@ impl TextSpec {
             cold.rings.clear();
             cold.strikes.clear();
             cold.blocks.clear();
+            cold.paragraph_styles.clear();
             cold.soft_breaks.clear();
             cold.pills.clear();
             cold.uncopied.clear();

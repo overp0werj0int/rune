@@ -125,8 +125,8 @@ impl TextSystem {
         };
         if let Some(m) = self.ascii.get(&key) { return m.clone(); }
         let sample: String = (0x21u8..0x7f).flat_map(|b| [b as char, ' ']).collect();
-        let l = self.layout_keyed(None, &sample, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base());
-        let empty = self.layout_keyed(None, "", &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base());
+        let l = self.layout_keyed(None, &sample, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base(), Inset::default());
+        let empty = self.layout_keyed(None, "", &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base(), Inset::default());
         let measured = (|| {
             let line = l.lines().next().filter(|_| l.lines().count() == 1)?;
             let mut runs = line.runs();
@@ -174,7 +174,7 @@ impl TextSystem {
             }
             let p = &mut paragraphs[k];
             let words = &lazy.content[p.start..p.end];
-            let l = self.layout_keyed(Some(p.key), words, &[], &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base());
+            let l = self.layout_keyed(Some(p.key), words, &[], &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base(), Inset::default());
             moved |= l.height() != p.height;
             (p.height, p.widths, p.layout, p.shaped) = (l.height(), [l.width(), l.full_width()], l, true);
             shaped_any = true;
@@ -234,7 +234,7 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
                 let mut hs = hash::KeyHasher::default();
                 (&lazy.content[start..e], lazy.style_key, flow == Flow::Rtl, lines, "run").hash(&mut hs);
                 let height = (f64::from(lines) * f64::from(h)) as f32;
-                out.push(Paragraph { start, end: e, y: y.round() as f32, height, widths: [widest, widest], flow, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
+                out.push(Paragraph { start, end: e, y: y.round() as f32, height, widths: [widest, widest], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
                 y += f64::from(height);
             }
             continue;
@@ -242,7 +242,7 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
         let mut hs = hash::KeyHasher::default();
         (words, lazy.style_key, flow == Flow::Rtl, Block::Paragraph).hash(&mut hs);
         let (height, w) = lazy.ascii.one_line(words, max_width, 0.0, true).unwrap_or((h, 0.0));
-        out.push(Paragraph { start: s, end: e, y: y.round() as f32, height, widths: [w, w], flow, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
+        out.push(Paragraph { start: s, end: e, y: y.round() as f32, height, widths: [w, w], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
         y += f64::from(height);
     }
     out
