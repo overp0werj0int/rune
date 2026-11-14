@@ -116,13 +116,20 @@ impl<S: 'static> Runtime<S> {
     }
 
     /// A secondary press at (x, y) on text field `path` with no `on_secondary_press` of its own:
-    /// its menu (`field_menu`), queued.
+    /// its menu (`field_menu`), queued. With one, the caret moves as for that menu
+    /// (`field_caret`) and false lets the app's handler run after it, so an app that draws its
+    /// own field menu (where there are no native menus) finds the caret where the press was.
     fn queue_field_menu(&mut self, path: &str, x: f32, y: f32) -> bool {
         let Some(i) = self.live(path) else { return false };
         let n = &self.nodes[i];
-        if n.handlers.on_secondary_press.is_some() || n.input.as_ref().is_none_or(|i| i.access.is_none()) { return false; }
+        if n.input.as_ref().is_none_or(|i| i.access.is_none()) { return false; }
+        let own = n.handlers.on_secondary_press.is_some();
         let [lx, ly] = self.to_local(i, x, y);
         let local = (lx - n.inset[0], ly - n.inset[1]);
+        if own {
+            self.queue.push(Action::FieldCaret(path.to_owned(), local));
+            return false;
+        }
         self.queue.push(Action::FieldMenu(path.to_owned(), (x, y), Some(local)));
         true
     }

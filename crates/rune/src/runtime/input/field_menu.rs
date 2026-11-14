@@ -28,32 +28,12 @@ impl<S: 'static> Runtime<S> {
         let Some(i) = self.live(&path) else { return false };
         let Some(input) = self.nodes[i].input.as_deref() else { return false };
         let Some(access) = input.access.clone() else { return false };
-        let (single, secure) = (input.single_line, input.edit.is_secure());
+        let secure = input.edit.is_secure();
         let spell = input.spellcheck && !secure;
-        let layout = self.nodes[i].text_layout.clone();
-        let scroll = self.input_scroll.get(&path).copied().unwrap_or(0.0);
-        let s = self.env.scale;
         let toggle = std::iter::successors(Some(i), |&j| self.nodes[j].parent).find_map(|j| self.nodes[j].handlers.on_spellcheck.clone());
         let keep = std::iter::successors(Some(i), |&j| self.nodes[j].parent).find_map(|j| self.nodes[j].handlers.on_spellcheck_languages.clone());
-        if self.focus.path() != Some(path.as_str()) {
-            self.set_focus(Some(path.clone()), false);
-        }
+        self.press_caret(i, local, spell);
         let e = access(states!(self));
-        e.set_single_line(single);
-        if let (Some((x, y)), Some(l)) = (local, layout.as_ref().map(TextLayout::view))
-            && e.preedit().is_none()
-        {
-            let caret = hit(e, l, x + scroll, y, s, single).caret;
-            let (a, b) = e.range();
-            // A press in the selection keeps it for Cut and Copy. Elsewhere it moves the caret
-            // there, and on a misspelled word selects the word, as Chromium does.
-            if a == b || caret < a || caret > b {
-                match spell.then(|| crate::spell::misspelled_at(&e.text, caret)).flatten() {
-                    Some((wa, wb)) => e.set_selection(wa, wb),
-                    None => e.set_caret(caret),
-                }
-            }
-        }
         let (a, b) = e.range();
         let word = spell
             .then(|| crate::spell::misspelled(&e.text, None))
@@ -110,6 +90,45 @@ impl<S: 'static> Runtime<S> {
             on_pick: Box::new(|_, _, _| {}),
             field: Some(Box::new(FieldMenu { path, word, suggestions, toggle, languages })),
         });
+        true
+    }
+
+    /// Focuses field `i` for its menu and, for a press at `local` in it (points from its text's
+    /// top-left), places the caret: a press in the selection keeps it for Cut and Copy. Elsewhere
+    /// it moves the caret there and, with `spell`, on a misspelled word selects the word, as
+    /// Chromium does.
+    fn press_caret(&mut self, i: usize, local: Option<(f32, f32)>, spell: bool) {
+        let path = self.nodes[i].path.clone();
+        let Some(input) = self.nodes[i].input.as_deref() else { return };
+        let Some(access) = input.access.clone() else { return };
+        let single = input.single_line;
+        let layout = self.nodes[i].text_layout.clone();
+        let scroll = self.input_scroll.get(&path).copied().unwrap_or(0.0);
+        let s = self.env.scale;
+        if self.focus.path() != Some(path.as_str()) {
+            self.set_focus(Some(path), false);
+        }
+        let e = access(states!(self));
+        e.set_single_line(single);
+        if let (Some((x, y)), Some(l)) = (local, layout.as_ref().map(TextLayout::view))
+            && e.preedit().is_none()
+        {
+            let caret = hit(e, l, x + scroll, y, s, single).caret;
+            let (a, b) = e.range();
+            if a == b || caret < a || caret > b {
+                match spell.then(|| crate::spell::misspelled_at(&e.text, caret)).flatten() {
+                    Some((wa, wb)) => e.set_selection(wa, wb),
+                    None => e.set_caret(caret),
+                }
+            }
+        }
+    }
+
+    /// A secondary press on a field whose own `on_secondary_press` draws its menu: the caret
+    /// goes where its field menu would put it, before the app's handler runs.
+    pub(super) fn field_caret(&mut self, path: String, local: (f32, f32)) -> bool {
+        let Some(i) = self.live(&path) else { return false };
+        self.press_caret(i, Some(local), false);
         true
     }
 

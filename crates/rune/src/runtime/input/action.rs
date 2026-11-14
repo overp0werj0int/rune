@@ -60,6 +60,9 @@ pub(super) enum Action {
     /// A text field's menu: the field, the window point it opens at, and where in the field a
     /// press asked for it (none from the keyboard).
     FieldMenu(String, (f32, f32), Option<(f32, f32)>),
+    /// A secondary press on a text field that draws its own menu: the field, and where in it
+    /// (points from its text's top-left), so the caret moves there first.
+    FieldCaret(String, (f32, f32)),
     Blur,
     /// What assistive technology asked of an element (`a11y/actions.rs`).
     A11y(String, A11yAct),
@@ -536,6 +539,7 @@ impl<S: 'static> Runtime<S> {
             Action::FileDialog(id, result) => self.run_file_dialog(id, result, &mut one),
             Action::Focus(path, x, y) => self.focus_input(path, x, y, &mut one),
             Action::FieldMenu(path, at, local) => self.field_menu(path, at, local, &mut one),
+            Action::FieldCaret(path, local) => self.field_caret(path, local),
             Action::Blur => {
                 if self.focus.path().is_none() { return false; }
                 self.set_focus(None, self.focus.keyboard());
