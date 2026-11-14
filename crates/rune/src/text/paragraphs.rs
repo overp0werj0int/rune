@@ -237,6 +237,34 @@ fn spans_in<'s>(spans: &'s [Span], a: usize, b: usize, isolates: &'s [(u32, u32)
     })
 }
 
+/// The spans that can meet a range of content bytes, found without reading them all when
+/// they're in the order of their starts, as an editor's line-by-line styling makes them: a
+/// by-paragraph text then costs each paragraph its own spans, not every span (typing in a
+/// 3,000-line styled draft spent most of its frame here).
+struct SpanWindow<'s> {
+    spans: &'s [Span],
+    /// The furthest end of each span and those before it; empty when they're out of order.
+    reach: Vec<u32>,
+}
+
+impl<'s> SpanWindow<'s> {
+    fn new(spans: &'s [Span]) -> Self {
+        let reach = if spans.is_sorted_by_key(|s| s.start) {
+            spans.iter().scan(0, |far, s| { *far = s.end.max(*far); Some(*far) }).collect()
+        } else { Vec::new() };
+        Self { spans, reach }
+    }
+
+    /// The spans, in their order, that may meet bytes `a..b`: all of them when out of order.
+    fn near(&self, a: usize, b: usize) -> &'s [Span] {
+        if self.reach.len() != self.spans.len() { return self.spans; }
+        // Spans before `lo` all end by `a`; spans from `hi` all start at `b` or later.
+        let lo = self.reach.partition_point(|&end| end as usize <= a);
+        let hi = self.spans.partition_point(|s| (s.start as usize) < b);
+        &self.spans[lo..hi.max(lo)]
+    }
+}
+
 /// `pills` inside content bytes `a..b`, each its label's shaped bytes.
 fn pills_in<'s>(pills: &'s [PillChip], a: usize, b: usize, isolates: &'s [(u32, u32)]) -> impl Iterator<Item = PillChip> + 's {
     pills.iter().filter(move |p| inside(p, a, b)).map(move |p| PillChip {
@@ -638,6 +666,7 @@ impl TextSystem {
                 _ => items.push((f, kept)),
             }
         }
+        let window = SpanWindow::new(&spec.spans);
         let mut waiting = 0;
         let (mut paragraphs, mut y) = (Vec::with_capacity(items.len()), 0.0f64);
         let (mut width, mut full_width, mut fresh) = (0.0f32, 0.0f32, 0);
@@ -679,7 +708,7 @@ impl TextSystem {
                     fresh += b - a;
                     let words = &content[a..b];
                     let text: Cow<str> = if isolates.is_empty() { Cow::Borrowed(words) } else { Cow::Owned(with_isolates(words, &isolates)) };
-                    let spans: Vec<Span> = spans_in(&spec.spans, a, b, &isolates).collect();
+                    let spans: Vec<Span> = spans_in(window.near(a, b), a, b, &isolates).collect();
                     let pills: Vec<PillChip> = pills_in(&spec.cold.pills, a, b, &isolates).collect();
                     self.layout_keyed(Some(key), &text, &spans, blocks, &pills, style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Owned, flow.base())
                 }
@@ -761,6 +790,7 @@ fn key_paragraphs(spec: &TextSpec, style_key: u64, a: usize, z: usize, start_flo
             found.push((a, b, flow, h.finish(), Box::default(), Some((height, w, n))));
         }
     };
+    let window = SpanWindow::new(&spec.spans);
     let mut start = a;
     for j in 0.. {
         let (words, known) = match &cache {
@@ -807,7 +837,7 @@ fn key_paragraphs(spec: &TextSpec, style_key: u64, a: usize, z: usize, start_flo
         let flow = forced.or_else(|| flow_of(words, &isolates)).unwrap_or(last_flow);
         let mut h = hash::KeyHasher::default();
         (words, style_key, flow == Flow::Rtl, spec.cold.blocks.get(k).copied().unwrap_or(Block::Paragraph)).hash(&mut h);
-        for s in spans_in(&spec.spans, a, b, &isolates) {
+        for s in spans_in(window.near(a, b), a, b, &isolates) {
             (s.start, s.end, s.mono, s.weight.map(f32::to_bits), s.size.map(f32::to_bits), s.italic).hash(&mut h);
         }
         for p in pills_in(&spec.cold.pills, a, b, &isolates) {
@@ -912,4 +942,37 @@ fn with_isolates(words: &str, isolates: &[(u32, u32)]) -> String {
     }
     out.push_str(&words[at..]);
     out
+}
+
+#[cfg(test)]
+mod span_window_tests {
+    use super::{Span, SpanWindow};
+
+    fn ranges(spans: &[Span]) -> Vec<(u32, u32)> { spans.iter().map(|s| (s.start, s.end)).collect() }
+
+    /// The window holds every span that meets a range, in the spans' order, whatever reaches
+    /// across from earlier: the same spans `spans_in` keeps from the whole list.
+    #[test]
+    fn a_window_keeps_every_span_that_meets_the_range() {
+        let spans = [Span::new(0, 2), Span::new(1, 40), Span::new(5, 7), Span::new(12, 14), Span::new(20, 22), Span::new(30, 30)];
+        let w = SpanWindow::new(&spans);
+        for a in 0..42 {
+            for b in a..42 {
+                let all: Vec<_> = spans.iter().filter(|s| (s.start as usize) < b && a < s.end as usize).cloned().collect();
+                let near: Vec<_> = w.near(a, b).iter().filter(|s| (s.start as usize) < b && a < s.end as usize).cloned().collect();
+                assert_eq!(ranges(&near), ranges(&all), "bytes {a}..{b}");
+            }
+        }
+        // Past the long span, a range reads only its own spans.
+        assert_eq!(ranges(w.near(41, 42)), Vec::<(u32, u32)>::new());
+        // Before it ends, the window runs from it: the spans between are read and dropped.
+        assert_eq!(ranges(w.near(20, 22)), [(1, 40), (5, 7), (12, 14), (20, 22)]);
+    }
+
+    /// Spans out of the order of their starts are all read, as before.
+    #[test]
+    fn spans_out_of_order_are_all_read() {
+        let spans = [Span::new(10, 12), Span::new(0, 2)];
+        assert_eq!(SpanWindow::new(&spans).near(0, 1).len(), 2);
+    }
 }

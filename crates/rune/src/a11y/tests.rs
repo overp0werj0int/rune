@@ -440,3 +440,19 @@ fn updates_report_structure_and_motion_beyond_accesskit_events() {
     assert!(rt.a11y_update().is_some(), "a scroll sends its viewport");
     assert!(rt.a11y_changes().moved, "a scroll moves boxes");
 }
+
+fn by_paragraph_field(s: &Field, _: &mut Cx<Field>) -> El {
+    col().child(text_input(&s.edit, crate::tok::type_::BODY).key("note").w(300.0).on_edit(|s: &mut Field| &mut s.edit).dir_by_paragraph())
+}
+
+#[test]
+fn by_paragraph_fields_expose_each_line_once() {
+    let mut edit = TextEdit::new("# Title\n\n#draft\n\nThe text");
+    edit.focused = true;
+    let mut rt = Runtime::new(Field { edit }, by_paragraph_field, (400.0, 200.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    let tree = rt.accessibility_tree();
+    let runs: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::TextRun).map(|(_, n)| n.value().unwrap_or("").to_owned()).collect();
+    // Each paragraph's runs hold its own bytes once: joined, they are the field's text.
+    assert_eq!(runs.concat(), "# Title\n\n#draft\n\nThe text");
+}

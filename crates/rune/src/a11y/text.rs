@@ -45,7 +45,9 @@ pub(crate) fn lines(layout: TextFlow<'_>, content: &str, s: f32, origin: [f32; 2
 fn piece_lines(p: crate::text::Piece<'_>, content: &str, s: f32, origin: [f32; 2], out: &mut Vec<Line>) {
     for line in p.layout.lines() {
         let m = line.metrics();
-        let range = p.content(line.text_range().start)..p.content(line.text_range().end);
+        // A blank paragraph is shaped with a stand-in character for its height; it holds no
+        // bytes of the field's, so a paragraph's lines end where the paragraph does.
+        let range = p.content(line.text_range().start).min(p.end)..p.content(line.text_range().end).min(p.end);
         if range.end > content.len() { break; }
         let (mut lengths, mut positions, mut widths, mut word_starts) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut x = m.offset;
