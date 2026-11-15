@@ -14,13 +14,16 @@
 /// let heading = ParagraphStyle::new().indent(48.0).hang(3).line_height(30.0).space_above(12.0);
 /// // "- item": the marker hangs, and wrapped lines start under "item".
 /// let item = ParagraphStyle::new().indent(48.0).hang(2);
-/// # let _ = (heading, item);
+/// // "  - nested": the spaces indent every line by their width, and only "- " hangs.
+/// let nested = ParagraphStyle::new().indent(48.0).hang(4).lead(2);
+/// # let _ = (heading, item, nested);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ParagraphStyle {
     indent: f32,
     first_line_indent: f32,
     hang: u32,
+    lead: u32,
     line_height: f32,
     space_above: f32,
 }
@@ -31,7 +34,7 @@ fn length(pt: f32) -> f32 {
 
 impl ParagraphStyle {
     pub const fn new() -> ParagraphStyle {
-        ParagraphStyle { indent: 0.0, first_line_indent: 0.0, hang: 0, line_height: 0.0, space_above: 0.0 }
+        ParagraphStyle { indent: 0.0, first_line_indent: 0.0, hang: 0, lead: 0, line_height: 0.0, space_above: 0.0 }
     }
 
     /// Every line starts `pt` points in from the paragraph's start edge: the left of a
@@ -55,6 +58,13 @@ impl ParagraphStyle {
         ParagraphStyle { hang: bytes.min(u32::MAX as usize) as u32, ..self }
     }
 
+    /// The first `bytes` of the hung bytes don't hang: they stay in the text's column and
+    /// indent every line of the paragraph by their width, as a nested list item's leading
+    /// spaces do, while the rest of the hung bytes (its marker) hang before them.
+    pub fn lead(self, bytes: usize) -> ParagraphStyle {
+        ParagraphStyle { lead: bytes.min(u32::MAX as usize) as u32, ..self }
+    }
+
     /// Every line of the paragraph is `pt` points tall, whatever sizes its spans set. 0 keeps
     /// the field's own line height.
     pub fn line_height(self, pt: f32) -> ParagraphStyle {
@@ -66,19 +76,25 @@ impl ParagraphStyle {
         ParagraphStyle { space_above: length(pt), ..self }
     }
 
-    /// [`Self::hang`] with `bytes` more: a field's IME preedit typed inside the hung bytes.
-    pub(crate) fn hang_more(self, bytes: usize) -> ParagraphStyle {
-        self.hang(self.hang as usize + bytes)
+    /// [`Self::hang`] with `bytes` more, and [`Self::lead`] too when `at` is inside the lead: a
+    /// field's IME preedit typed at byte `at` inside the hung bytes.
+    pub(crate) fn hang_more(self, at: usize, bytes: usize) -> ParagraphStyle {
+        let s = self.hang(self.hang as usize + bytes);
+        if at < self.lead as usize { s.lead(self.lead as usize + bytes) } else { s }
     }
 
     pub(crate) fn hung(self) -> usize {
         self.hang as usize
     }
 
+    pub(crate) fn led(self) -> usize {
+        (self.lead as usize).min(self.hang as usize)
+    }
+
     /// What a paragraph's shaping and line breaking read of it, at `scale`, its first `hang`
-    /// shaped bytes hanging.
-    pub(crate) fn inset(self, scale: f32, hang: usize) -> Inset {
-        Inset { indent: (self.indent * scale).round(), first: (self.first_line_indent * scale).round(), hang, line_height: self.line_height }
+    /// shaped bytes hung, the first `lead` of them indenting every line.
+    pub(crate) fn inset(self, scale: f32, hang: usize, lead: usize) -> Inset {
+        Inset { indent: (self.indent * scale).round(), first: (self.first_line_indent * scale).round(), hang, lead, line_height: self.line_height }
     }
 
     /// The room above the paragraph, in device px.
@@ -87,13 +103,13 @@ impl ParagraphStyle {
     }
 
     /// What a paragraph's own layout depends on: all but the space above it.
-    pub(crate) fn layout_bits(self) -> [u32; 4] {
-        [self.indent.to_bits(), self.first_line_indent.to_bits(), self.hang, self.line_height.to_bits()]
+    pub(crate) fn layout_bits(self) -> [u32; 5] {
+        [self.indent.to_bits(), self.first_line_indent.to_bits(), self.hang, self.lead, self.line_height.to_bits()]
     }
 
-    pub(crate) fn bits(self) -> [u32; 5] {
-        let [a, b, c, d] = self.layout_bits();
-        [a, b, c, d, self.space_above.to_bits()]
+    pub(crate) fn bits(self) -> [u32; 6] {
+        let [a, b, c, d, e] = self.layout_bits();
+        [a, b, c, d, e, self.space_above.to_bits()]
     }
 }
 
@@ -107,6 +123,8 @@ pub(crate) struct Inset {
     pub(crate) first: f32,
     /// The first line also starts the width of its first `hang` bytes early.
     pub(crate) hang: usize,
+    /// The first `lead` of the hung bytes indent every line by their width instead.
+    pub(crate) lead: usize,
     /// The line height in points, or 0 for the text style's.
     pub(crate) line_height: f32,
 }
@@ -117,7 +135,7 @@ impl Inset {
         self.indent == 0.0 && self.first == 0.0 && self.hang == 0
     }
 
-    pub(crate) fn bits(self) -> [u32; 4] {
-        [self.indent.to_bits(), self.first.to_bits(), self.hang as u32, self.line_height.to_bits()]
+    pub(crate) fn bits(self) -> [u32; 5] {
+        [self.indent.to_bits(), self.first.to_bits(), self.hang as u32, self.lead as u32, self.line_height.to_bits()]
     }
 }

@@ -696,7 +696,7 @@ impl TextSystem {
                 continue;
             }
             let own = spec.cold.paragraph_styles.get(k).copied().unwrap_or_default();
-            let inset = own.inset(scale, shaped(&isolates, own.hung().min(b - a)));
+            let inset = own.inset(scale, shaped(&isolates, own.hung().min(b - a)), shaped(&isolates, own.led().min(b - a)));
             // The same paragraph at the other width (the same text, so the same index).
             let twin = other.and_then(|o| o.paragraphs.get(k)).filter(|o| o.key == key && o.shaped);
             // A kept paragraph broken at another width, or this text's own paragraph at the

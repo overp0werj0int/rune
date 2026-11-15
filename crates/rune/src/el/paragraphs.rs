@@ -28,7 +28,7 @@ impl El {
             let k = text.as_bytes()[..at.min(text.len())].iter().filter(|&&b| b == b'\n').count();
             let start = text[..at.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
             if let Some(s) = styles.get_mut(k).filter(|s| at - start < s.hung()) {
-                *s = s.hang_more(preedit.len());
+                *s = s.hang_more(at - start, preedit.len());
             }
         }
         let Some(t) = self.text.as_mut() else { return self };

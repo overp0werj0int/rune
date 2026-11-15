@@ -56,9 +56,12 @@ pub(super) fn break_lines_with_blocks(
     let mut starts = Starts { first: inset.indent + inset.first, rest: inset.indent };
     if inset.hang > 0 {
         // The hung bytes' width is theirs once they're on a line: break with them in the
-        // text's column, measure them there, and break again with them before it.
+        // text's column, measure them there, and break again with them before it. The lead
+        // stays in the column and moves the other lines in by its width.
         break_lines_at(layout, blocks, Starts { first: inset.indent, rest: inset.indent }, font_size, scale, max_width, caps.clone());
-        starts.first -= hung_advance(layout, inset.hang);
+        let lead = advance(layout, 0, inset.lead);
+        starts.first -= advance(layout, inset.lead, inset.hang);
+        starts.rest += lead;
     }
     starts.first = starts.first.max(0.0);
     break_lines_at(layout, blocks, starts, font_size, scale, max_width, caps);
@@ -72,10 +75,10 @@ struct Starts {
     rest: f32,
 }
 
-/// The advance of the clusters within the first line's first `hang` bytes.
-fn hung_advance(layout: &Layout<Ink>, hang: usize) -> f32 {
+/// The advance of the first line's clusters within bytes `from..to`.
+fn advance(layout: &Layout<Ink>, from: usize, to: usize) -> f32 {
     let Some(line) = layout.get(0) else { return 0.0 };
-    line.runs().flat_map(|run| run.clusters()).filter(|c| c.text_range().end <= hang).map(|c| c.advance()).sum()
+    line.runs().flat_map(|run| run.clusters()).filter(|c| from <= c.text_range().start && c.text_range().end <= to).map(|c| c.advance()).sum()
 }
 
 /// Breaks `layout` into lines, each paragraph indented by its block and `starts`. A pill's chip
