@@ -27,6 +27,18 @@ impl<S: 'static> Runtime<S> {
     pub fn secondary_down(&mut self, x: f32, y: f32) {
         self.pointer = Some((x, y));
         if self.autoscroll_press(crate::PointerButton::Secondary) { return; }
+        // Outside the open modal a secondary press is a press outside it, as a primary one is:
+        // it closes a modal that closes on outside presses, and reaches nothing behind it.
+        if let Some(i) = self.active_modal()
+            && self.primary_target(x, y).is_none_or(|t| !self.allowed(t))
+        {
+            self.dismiss_help();
+            if self.nodes[i].handlers.modal.as_ref().is_some_and(|m| m.outside) {
+                self.queue.push(Action::Dismiss(self.nodes[i].path.clone()));
+            }
+            self.secondary = capture::Secondary::Up;
+            return;
+        }
         self.tint_down(x, y, crate::PointerButton::Secondary);
         self.release_hover_hold();
         self.focus.step(focus_machine::FocusEvent::Pointed);
