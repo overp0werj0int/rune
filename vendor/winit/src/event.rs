@@ -272,10 +272,28 @@ pub enum WindowEvent {
     CursorLeft { device_id: DeviceId },
 
     /// A mouse wheel movement or touchpad scroll occurred.
-    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: TouchPhase },
+    ///
+    /// `time` is when the platform says the input happened, on its own monotonic clock from an
+    /// arbitrary start: only differences between events mean anything. Events that waited in
+    /// the queue keep their spacing in it.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only **Wayland** gives `time` (the frame's axis event time); elsewhere it is `None`.
+    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: TouchPhase, time: Option<std::time::Duration> },
 
     /// An mouse button press has been received.
     MouseInput { device_id: DeviceId, state: ElementState, button: MouseButton },
+
+    /// Fingers resting on a touchpad without moving: `Started` when they land, `Ended` when they
+    /// lift, `Cancelled` when they start moving or another gesture takes over. Apps stop
+    /// kinetic scrolling on `Started`. `time` is as for [`WindowEvent::MouseWheel`].
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only available on **Wayland**, where the compositor offers
+    ///   `zwp_pointer_gestures_v1` version 3 or later.
+    HoldGesture { device_id: DeviceId, phase: TouchPhase, time: Option<std::time::Duration> },
 
     /// Two-finger pinch gesture, often used for magnification.
     ///
@@ -1055,6 +1073,7 @@ mod tests {
                     device_id: did,
                     delta: event::MouseScrollDelta::LineDelta(0.0, 0.0),
                     phase: event::TouchPhase::Started,
+                    time: None,
                 });
                 with_window_event(MouseInput {
                     device_id: did,

@@ -24,6 +24,7 @@ impl<S: 'static> Runtime<S> {
     /// scroll view; what none takes scrolls as [`Self::wheel_xy`] does.
     pub fn wheel_event(&mut self, ev: WheelEvent) {
         if ev.phase == GesturePhase::Began { self.wheel_began(); }
+        self.throw_arrived(&ev);
         let moved = ev.dx != 0.0 || ev.dy != 0.0;
         if moved {
             self.dismiss_help();
@@ -33,7 +34,10 @@ impl<S: 'static> Runtime<S> {
             let ev = WheelEvent { momentum: self.wheel_lock.momentum(), ..ev };
             let gesture = self.wheel_lock.gesture;
             let phased = self.wheel_lock.phased();
-            if !self.offer_wheel(gesture, ev) { self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy, phased); }
+            if !self.offer_wheel(gesture, ev) {
+                self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy, phased);
+                if ev.phase == GesturePhase::Ended { self.throw_released(gesture, ev.x, ev.y); }
+            }
         }
         if ev.phase == GesturePhase::Ended { self.wheel_ended(); }
     }
@@ -81,6 +85,7 @@ impl<S: 'static> Runtime<S> {
         }
         if taken.is_none() {
             self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy, phased);
+            if ev.phase == GesturePhase::Ended { self.throw_released(gesture, ev.x, ev.y); }
         }
         taken.unwrap_or(false)
     }

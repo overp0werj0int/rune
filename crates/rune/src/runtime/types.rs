@@ -425,6 +425,9 @@ pub(super) struct ScrollState {
 pub(super) struct AxisScroll {
     pub(super) offset: f64,
     pub(super) v: f32,
+    /// A trackpad fling's curve while it carries the offset (`runtime/scroll/fling.rs`), in
+    /// place of `v`.
+    pub(super) fling: Option<super::scroll_fling::Fling>,
     pub(super) max: f64,
     /// Velocity of a glide to `aim` (`Tx::scroll_to`) while one runs.
     pub(super) glide: Option<f32>,
@@ -445,6 +448,15 @@ impl AxisScroll {
     /// `offset`.
     pub(super) fn toward(&self, delta: f64) -> f64 {
         match self.flow { crate::el::Flow::Ltr => -delta, crate::el::Flow::Rtl => delta }
+    }
+
+    /// Its momentum or fling speed (offset points a second).
+    pub(super) fn coast(&self) -> f32 { self.fling.map_or(self.v, |f| f.velocity() as f32) }
+
+    /// Momentum and any fling stop.
+    pub(super) fn stop(&mut self) {
+        self.v = 0.0;
+        self.fling = None;
     }
 }
 

@@ -433,7 +433,7 @@ impl<S: 'static> Runtime<S> {
         let Some(st) = self.scrolls.get_mut(&id) else { return };
         let before = st.x.offset;
         st.x.offset = (st.x.offset + st.x.toward(f64::from(dx))).clamp(0.0, st.x.max);
-        st.x.v = 0.0;
+        st.x.stop();
         st.x.glide = None;
         st.moved();
         log_event!(self, "wheel-x {dx:.1}");
@@ -452,6 +452,7 @@ impl<S: 'static> Runtime<S> {
         self.dismiss_help();
         let Some(id) = self.scroll_at_axis(x, y, true) else { return };
         if let Some(st) = self.scrolls.get_mut(&id) {
+            st.x.stop();
             st.x.v = st.x.toward(f64::from(vx)) as f32;
             st.x.glide = None;
             log_event!(self, "fling-x {vx:.0}");
@@ -481,6 +482,12 @@ impl<S: 'static> Runtime<S> {
         let mut moving = false;
         if st.x.glide.is_some() {
             moving = scroll_offset::glide_axis(st.glide_spring(), &mut st.x.offset, &mut st.x.glide, st.x.aim.min(st.x.max), dt);
+        } else if let Some(mut fling) = st.x.fling {
+            let (delta, running) = fling.step(f64::from(dt));
+            st.x.offset += delta;
+            let edge = st.x.offset <= 0.0 || st.x.offset >= st.x.max;
+            st.x.fling = (running && !edge).then_some(fling);
+            moving = true;
         } else if st.x.v.abs() > 1.0 {
             let decay = (-SCROLL_DECAY * dt).exp();
             st.x.offset += f64::from(st.x.v * (1.0 - decay) / SCROLL_DECAY);
@@ -521,7 +528,7 @@ impl<S: 'static> Runtime<S> {
         let offset = scroll_edge::reveal(st.x.offset, left, width, viewport, margin).clamp(0.0, max);
         if offset == st.x.offset { return; }
         st.x.offset = offset;
-        st.x.v = 0.0;
+        st.x.stop();
         st.x.glide = None;
         st.moved();
     }

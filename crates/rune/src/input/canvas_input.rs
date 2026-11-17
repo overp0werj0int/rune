@@ -36,6 +36,9 @@ pub struct WheelEvent {
     /// Point-precise deltas (a trackpad or a free-spinning wheel), rather than the line steps of
     /// a notched mouse wheel, which an app may want to smooth.
     pub precise: bool,
+    /// When the platform says the frame happened, in seconds on its own input clock (Wayland's
+    /// event time), where it says so. A trackpad's release velocity is measured on it.
+    pub time: Option<f64>,
 }
 
 impl WheelEvent {
@@ -46,6 +49,7 @@ impl WheelEvent {
     pub fn mods(mut self, mods: Mods) -> Self { self.mods = mods; self }
     pub fn phase(mut self, phase: GesturePhase) -> Self { self.phase = phase; self }
     pub fn precise(mut self, precise: bool) -> Self { self.precise = precise; self }
+    pub fn time(mut self, seconds: f64) -> Self { self.time = Some(seconds); self }
 }
 
 /// A pinch an [`El::on_magnify`] handler sees.

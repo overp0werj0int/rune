@@ -1738,6 +1738,7 @@ unsafe fn public_window_callback_inner(
                     device_id: DEVICE_ID,
                     delta: LineDelta(0.0, value),
                     phase: TouchPhase::Moved,
+                    time: None,
                 },
             });
 
@@ -1758,6 +1759,7 @@ unsafe fn public_window_callback_inner(
                     device_id: DEVICE_ID,
                     delta: LineDelta(value, 0.0),
                     phase: TouchPhase::Moved,
+                    time: None,
                 },
             });
 

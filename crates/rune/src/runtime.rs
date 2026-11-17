@@ -154,6 +154,8 @@ pub use help_look::HelpLook;
 mod scroll_edge;
 #[path = "runtime/scroll/x.rs"]
 mod scroll_x;
+#[path = "runtime/scroll/fling.rs"]
+mod scroll_fling;
 #[path = "runtime/scroll/offset.rs"]
 mod scroll_offset;
 #[path = "runtime/scroll/reveal.rs"]
@@ -201,6 +203,8 @@ mod primary_selection;
 mod gesture_dispatch;
 #[path = "runtime/input/key_releases.rs"]
 mod key_releases;
+#[path = "runtime/input/throw.rs"]
+mod throw;
 #[path = "runtime/input/touch.rs"]
 mod touch_input;
 pub use touch_input::TouchPhase;
@@ -624,6 +628,8 @@ pub struct Runtime<S: 'static> {
     scrolls: HashMap<NodeId, ScrollState>,
     /// The axis the current wheel or trackpad gesture scrolls (`runtime/scroll/x.rs`).
     wheel_lock: scroll_x::WheelLock,
+    /// A trackpad swipe's release, its fling and the boost (`runtime/input/throw.rs`).
+    throw: throw::Throw,
     /// The finger that is down and the viewport a touch holds (`runtime/input/touch.rs`).
     touch: touch_input::Touch,
     grows: HashMap<NodeId, GrowTrack>,
@@ -1018,6 +1024,7 @@ impl<S: 'static> Runtime<S> {
             seen: Vec::new(),
             scrolls: HashMap::default(),
             wheel_lock: Default::default(),
+            throw: Default::default(),
             touch: Default::default(),
             grows: HashMap::default(),
             stacks: HashMap::default(),

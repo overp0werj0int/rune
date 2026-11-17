@@ -19,6 +19,8 @@ pub(super) enum ScrollMode {
     Momentum { v: f32, hand: Hand },
     /// Gliding on a spring (`ScrollState::glide_spring`) at `v` points a second.
     Glide { v: f32, to: GlideTo, hand: Hand },
+    /// Coasting on a trackpad fling's curve (`runtime/scroll/fling.rs`).
+    Fling { fling: super::scroll_fling::Fling, hand: Hand },
 }
 
 /// The hand latches a mode carries from frame to frame, whatever moves the offset.
@@ -71,14 +73,14 @@ impl ScrollMode {
     pub(super) fn hand(self) -> Hand {
         match self {
             ScrollMode::Rest(hand) | ScrollMode::Pinned(hand) => hand,
-            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } => hand,
+            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Fling { hand, .. } => hand,
         }
     }
 
     fn hand_mut(&mut self) -> &mut Hand {
         match self {
             ScrollMode::Rest(hand) | ScrollMode::Pinned(hand) => hand,
-            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } => hand,
+            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Fling { hand, .. } => hand,
         }
     }
 
@@ -103,6 +105,13 @@ impl ScrollMode {
         ScrollMode::Momentum { v, hand: self.hand() }
     }
 
+    /// The same mode coasting on `fling`, keeping the hand's latches.
+    pub(super) fn to_fling(self, fling: super::scroll_fling::Fling) -> Self {
+        #[cfg(test)]
+        note_write();
+        ScrollMode::Fling { fling, hand: self.hand() }
+    }
+
     /// The same mode gliding at `v` toward `to`, keeping the hand's latches.
     pub(super) fn to_glide(self, v: f32, to: GlideTo) -> Self {
         #[cfg(test)]
@@ -114,6 +123,7 @@ impl ScrollMode {
     pub(super) fn coast(self) -> f32 {
         match self {
             ScrollMode::Momentum { v, .. } => v,
+            ScrollMode::Fling { fling, .. } => fling.velocity() as f32,
             _ => 0.0,
         }
     }
@@ -319,6 +329,7 @@ mod tests {
             ScrollMode::Rest(_) => DevMode::Rest,
             ScrollMode::Pinned(_) => DevMode::Pinned,
             ScrollMode::Momentum { v, .. } => DevMode::Momentum(v),
+            ScrollMode::Fling { fling, .. } => DevMode::Momentum(fling.velocity() as f32),
             ScrollMode::Glide { v, .. } => DevMode::Glide(v),
         }
     }

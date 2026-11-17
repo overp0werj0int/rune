@@ -45,7 +45,7 @@ impl<S: 'static> Runtime<S> {
             if glide.is_some() { st.spring = glide; }
             if let Some(x) = r.x.filter(|_| axes.x()) {
                 let to = f64::from(x).max(0.0);
-                st.x.v = 0.0;
+                st.x.stop();
                 if let Some(spring) = glide && (to.min(st.x.max) - st.x.offset).abs() > 0.5 {
                     // A long trip cuts to a couple of viewports out first, as a glide to the bottom does.
                     let reach = scroll_bottom::GLIDE_REACH * view_w;
@@ -169,7 +169,7 @@ impl<S: 'static> Runtime<S> {
         match st.mode {
             ScrollMode::Glide { to: GlideTo::ShrunkEnd(_), .. } if held || st.shrink_cut() || end >= st.offset => st.mode = st.mode.to_rest(),
             ScrollMode::Glide { v, to: GlideTo::ShrunkEnd(_), .. } => st.mode = st.mode.to_glide(v, GlideTo::ShrunkEnd(end)),
-            ScrollMode::Rest(_) | ScrollMode::Momentum { .. } if moving && !(held || st.shrink_cut() || st.offset > overflow || st.offset - end <= 0.5) => {
+            ScrollMode::Rest(_) | ScrollMode::Momentum { .. } | ScrollMode::Fling { .. } if moving && !(held || st.shrink_cut() || st.offset > overflow || st.offset - end <= 0.5) => {
                 st.mode = st.mode.to_glide(0.0, GlideTo::ShrunkEnd(end));
                 st.spring = None;
             }

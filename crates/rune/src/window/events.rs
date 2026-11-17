@@ -447,7 +447,7 @@ impl<S: 'static> Host<S> {
                 }
                 l.request_redraw();
             }
-            WindowEvent::MouseWheel { delta, phase, .. } => {
+            WindowEvent::MouseWheel { delta, phase, time, .. } => {
                 let shift = crate::runtime::SHIFT_TURNS_WHEEL && self.mods.shift_key();
                 // In window points: a wheel turns as far on screen at any zoom, as Chromium's does,
                 // and a pinch is the same gesture whatever the zoom.
@@ -461,12 +461,19 @@ impl<S: 'static> Host<S> {
                 match rt.pointer() {
                     // Off macOS a trackpad pinch is a Ctrl + wheel.
                     Some((x, y)) if !cfg!(target_os = "macos") && self.mods.control_key() && rt.pinch_wheel(x, y, dy) => {}
-                    Some((x, y)) => rt.wheel_event(crate::WheelEvent::new(dx / rt.zoom(), dy / rt.zoom()).at(x, y).mods(map_mods(self.mods))
-                        .phase(phase).precise(precise)),
+                    Some((x, y)) => rt.wheel_event(crate::WheelEvent {
+                        time: time.map(|t| t.as_secs_f64()),
+                        ..crate::WheelEvent::new(dx / rt.zoom(), dy / rt.zoom()).at(x, y).mods(map_mods(self.mods)).phase(phase).precise(precise)
+                    }),
                     None if phase == crate::GesturePhase::Began => rt.wheel_began(),
                     None if phase == crate::GesturePhase::Ended => rt.wheel_ended(),
                     None => {}
                 }
+                l.request_redraw();
+            }
+            // Fingers resting on the touchpad stop a fling.
+            WindowEvent::HoldGesture { phase: winit::event::TouchPhase::Started, time, .. } => {
+                rt.touchpad_hold(time.map(|t| t.as_secs_f64()));
                 l.request_redraw();
             }
             WindowEvent::PinchGesture { delta, phase, .. } => {

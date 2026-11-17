@@ -409,11 +409,17 @@ policy changes are applied in the same mutation phase.
   Page Up and Page Down stay vertical; AppKit scrolls an `NSScrollView` with Left and Right only
   when nothing focused takes them. Virtual rows are vertical only. Platforms report wheels through
   `Runtime::wheel_xy` with `wheel_began` and `wheel_ended` around trackpad gestures, or
-  `Runtime::wheel_event` with modifiers and phases; `Runtime::wheel` stays the vertical path.
+  `Runtime::wheel_event` with modifiers, phases and the platform's event time; `Runtime::wheel`
+  stays the vertical path. Off macOS, whose trackpad sends its own momentum, a trackpad swipe
+  throws its scroll view when the fingers lift, as Chrome on Linux does
+  (`runtime/input/throw.rs`, `runtime/scroll/fling.rs`): the velocity of the last three frames,
+  Chromium's physics fling curve, and Chromium's boost for a quick second swipe the same way. A
+  new swipe stops it, and so does `Runtime::touchpad_hold`, which the window calls for Wayland's
+  hold gesture (fingers resting on the touchpad).
 - **Canvas input** (`input/canvas_input.rs`): what an infinite canvas, map or image viewer needs.
   `.on_wheel(|s, e: WheelEvent, tx| -> bool)` hears wheel and trackpad deltas over the element
   before any scroll view does, innermost first up to the nearest scroll view, with `dx`, `dy`,
-  the pointer in the element's own layout points (under any `live_scale`), `mods`, `phase`, `momentum` and `precise`.
+  the pointer in the element's own layout points (under any `live_scale`), `mods`, `phase`, `momentum`, `precise` and `time`.
   Returning true takes the delta, and the element then hears the rest of that gesture, its
   momentum included, wherever the pointer goes; false lets it scroll, and a gesture that
   scrolled stays a scroll. `.on_magnify(|s, e: MagnifyEvent, tx| -> bool)` hears trackpad

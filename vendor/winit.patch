@@ -1,27 +1,46 @@
-diff --git a/src/platform_impl/linux/wayland/seat/pointer/mod.rs b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
---- a/src/platform_impl/linux/wayland/seat/pointer/mod.rs
-+++ b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
-@@ -171,3 +171,3 @@
-                 },
--                PointerEventKind::Axis { horizontal, vertical, .. } => {
-+                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
-                     // Get the current phase.
-@@ -204,5 +204,14 @@
-                     } else {
-                         // NOTE: Wayland sign convention is the inverse of winit.
-+                        use sctk::reexports::client::protocol::wl_pointer::AxisSource;
-+                        // Chromium 152, wayland_pointer.cc: OnAxis converts surface units by
-+                        // kWheelDelta / kAxisValueScale. Only finger and continuous sources use
-+                        // this gain here: a wheel can send axis-only frames between detents.
-+                        const FINGER_POINTS_PER_AXIS_UNIT: f64 = 120.0 / 10.0;
-+                        let gain = match source {
-+                            Some(AxisSource::Finger | AxisSource::Continuous) => FINGER_POINTS_PER_AXIS_UNIT,
-+                            _ => 1.0,
-+                        };
-                         MouseScrollDelta::PixelDelta(
--                            LogicalPosition::new(-horizontal.absolute, -vertical.absolute)
-+                            LogicalPosition::new(-horizontal.absolute * gain, -vertical.absolute * gain)
-                                 .to_physical(scale_factor),
+diff --git a/src/event.rs b/src/event.rs
+index 4e01420..a0775ed 100644
+--- a/src/event.rs
++++ b/src/event.rs
+@@ -272,11 +272,29 @@ pub enum WindowEvent {
+     CursorLeft { device_id: DeviceId },
+ 
+     /// A mouse wheel movement or touchpad scroll occurred.
+-    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: TouchPhase },
++    ///
++    /// `time` is when the platform says the input happened, on its own monotonic clock from an
++    /// arbitrary start: only differences between events mean anything. Events that waited in
++    /// the queue keep their spacing in it.
++    ///
++    /// ## Platform-specific
++    ///
++    /// - Only **Wayland** gives `time` (the frame's axis event time); elsewhere it is `None`.
++    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: TouchPhase, time: Option<std::time::Duration> },
+ 
+     /// An mouse button press has been received.
+     MouseInput { device_id: DeviceId, state: ElementState, button: MouseButton },
+ 
++    /// Fingers resting on a touchpad without moving: `Started` when they land, `Ended` when they
++    /// lift, `Cancelled` when they start moving or another gesture takes over. Apps stop
++    /// kinetic scrolling on `Started`. `time` is as for [`WindowEvent::MouseWheel`].
++    ///
++    /// ## Platform-specific
++    ///
++    /// - Only available on **Wayland**, where the compositor offers
++    ///   `zwp_pointer_gestures_v1` version 3 or later.
++    HoldGesture { device_id: DeviceId, phase: TouchPhase, time: Option<std::time::Duration> },
++
+     /// Two-finger pinch gesture, often used for magnification.
+     ///
+     /// ## Platform-specific
+@@ -1055,6 +1073,7 @@ mod tests {
+                     device_id: did,
+                     delta: event::MouseScrollDelta::LineDelta(0.0, 0.0),
+                     phase: event::TouchPhase::Started,
++                    time: None,
+                 });
+                 with_window_event(MouseInput {
+                     device_id: did,
 diff --git a/src/platform/macos.rs b/src/platform/macos.rs
 index 30623b0..943e97b 100644
 --- a/src/platform/macos.rs
@@ -52,6 +71,284 @@ index 30623b0..943e97b 100644
 +pub fn take_ime_replacement() -> Option<std::ops::Range<usize>> {
 +    crate::platform_impl::ime_text::REPLACEMENT.with_borrow_mut(|r| r.take())
 +}
+diff --git a/src/platform/windows.rs b/src/platform/windows.rs
+index e4593be..5f1b921 100644
+--- a/src/platform/windows.rs
++++ b/src/platform/windows.rs
+@@ -13,6 +13,14 @@ use crate::monitor::MonitorHandle;
+ use crate::window::{BadIcon, Icon, Window, WindowAttributes};
+ 
+ /// Window Handle type used by Win32 API
++/// Builds winit's keyboard-layout table for thread `thread_id`'s keyboard layout on the calling
++/// thread, so the first key or mouse message that thread's windows handle doesn't build it (8-10
++/// ms, every virtual key through `ToUnicodeEx`). Call it on a thread of its own at launch with
++/// the UI thread's id.
++pub fn warm_keyboard_layout(thread_id: u32) {
++    crate::platform_impl::warm_layout(thread_id);
++}
++
+ pub type HWND = isize;
+ /// Menu Handle type used by Win32 API
+ pub type HMENU = isize;
+diff --git a/src/platform_impl/linux/wayland/seat/mod.rs b/src/platform_impl/linux/wayland/seat/mod.rs
+index eaecd93..a04a510 100644
+--- a/src/platform_impl/linux/wayland/seat/mod.rs
++++ b/src/platform_impl/linux/wayland/seat/mod.rs
+@@ -9,6 +9,7 @@ use sctk::reexports::client::backend::ObjectId;
+ use sctk::reexports::client::protocol::wl_seat::WlSeat;
+ use sctk::reexports::client::protocol::wl_touch::WlTouch;
+ use sctk::reexports::client::{Connection, Proxy, QueueHandle};
++use sctk::reexports::protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_hold_v1::ZwpPointerGestureHoldV1;
+ use sctk::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
+ use sctk::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_v3::ZwpTextInputV3;
+ 
+@@ -24,6 +25,7 @@ mod pointer;
+ mod text_input;
+ mod touch;
+ 
++pub use pointer::pointer_gestures::PointerGesturesState;
+ pub use pointer::relative_pointer::RelativePointerState;
+ pub use pointer::{PointerConstraintsState, WinitPointerData, WinitPointerDataExt};
+ pub use text_input::{TextInputState, ZwpTextInputV3Ext};
+@@ -49,6 +51,9 @@ pub struct WinitSeatState {
+     /// The relative pointer bound on the seat.
+     relative_pointer: Option<ZwpRelativePointerV1>,
+ 
++    /// The touchpad hold gesture bound on the seat's pointer.
++    hold_gesture: Option<ZwpPointerGestureHoldV1>,
++
+     /// The keyboard bound on the seat.
+     keyboard_state: Option<KeyboardState>,
+ 
+@@ -122,6 +127,14 @@ impl SeatHandler for WinitState {
+                     )
+                 });
+ 
++                seat_state.hold_gesture = self.pointer_gestures.as_ref().map(|manager| {
++                    manager.get_hold_gesture(
++                        themed_pointer.pointer(),
++                        queue_handle,
++                        pointer::pointer_gestures::HoldData::default(),
++                    )
++                });
++
+                 let themed_pointer = Arc::new(themed_pointer);
+ 
+                 // Register cursor surface.
+@@ -175,6 +188,10 @@ impl SeatHandler for WinitState {
+                     relative_pointer.destroy();
+                 }
+ 
++                if let Some(hold_gesture) = seat_state.hold_gesture.take() {
++                    hold_gesture.destroy();
++                }
++
+                 if let Some(pointer) = seat_state.pointer.take() {
+                     let pointer_data = pointer.pointer().winit_data();
+ 
+diff --git a/src/platform_impl/linux/wayland/seat/pointer/mod.rs b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
+index 3dcb00b..a0b832d 100644
+--- a/src/platform_impl/linux/wayland/seat/pointer/mod.rs
++++ b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
+@@ -33,6 +33,7 @@ use crate::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, Wind
+ use crate::platform_impl::wayland::state::WinitState;
+ use crate::platform_impl::wayland::{self, DeviceId, WindowId};
+ 
++pub mod pointer_gestures;
+ pub mod relative_pointer;
+ 
+ impl PointerHandler for WinitState {
+@@ -169,7 +170,7 @@ impl PointerHandler for WinitState {
+                         window_id,
+                     );
+                 },
+-                PointerEventKind::Axis { horizontal, vertical, .. } => {
++                PointerEventKind::Axis { time, horizontal, vertical, source } => {
+                     // Get the current phase.
+                     let mut pointer_data = pointer.winit_data().inner.lock().unwrap();
+ 
+@@ -203,14 +204,23 @@ impl PointerHandler for WinitState {
+                         )
+                     } else {
+                         // NOTE: Wayland sign convention is the inverse of winit.
++                        use sctk::reexports::client::protocol::wl_pointer::AxisSource;
++                        // Chromium 152, wayland_pointer.cc: OnAxis converts surface units by
++                        // kWheelDelta / kAxisValueScale. Only finger and continuous sources use
++                        // this gain here: a wheel can send axis-only frames between detents.
++                        const FINGER_POINTS_PER_AXIS_UNIT: f64 = 120.0 / 10.0;
++                        let gain = match source {
++                            Some(AxisSource::Finger | AxisSource::Continuous) => FINGER_POINTS_PER_AXIS_UNIT,
++                            _ => 1.0,
++                        };
+                         MouseScrollDelta::PixelDelta(
+-                            LogicalPosition::new(-horizontal.absolute, -vertical.absolute)
++                            LogicalPosition::new(-horizontal.absolute * gain, -vertical.absolute * gain)
+                                 .to_physical(scale_factor),
+                         )
+                     };
+ 
+                     self.events_sink.push_window_event(
+-                        WindowEvent::MouseWheel { device_id, delta, phase },
++                        WindowEvent::MouseWheel { device_id, delta, phase, time: Some(Duration::from_millis(u64::from(time))) },
+                         window_id,
+                     )
+                 },
+diff --git a/src/platform_impl/linux/wayland/seat/pointer/pointer_gestures.rs b/src/platform_impl/linux/wayland/seat/pointer/pointer_gestures.rs
+new file mode 100644
+index 0000000..32b870a
+--- /dev/null
++++ b/src/platform_impl/linux/wayland/seat/pointer/pointer_gestures.rs
+@@ -0,0 +1,98 @@
++//! Pointer gestures: the hold, fingers resting on a touchpad without moving, which apps take as
++//! the signal to stop kinetic scrolling (`zwp_pointer_gesture_hold_v1`, version 3).
++
++use std::ops::Deref;
++use std::sync::Mutex;
++use std::time::Duration;
++
++use sctk::reexports::client::globals::{BindError, GlobalList};
++use sctk::reexports::client::{delegate_dispatch, Connection, Dispatch, Proxy, QueueHandle};
++use sctk::reexports::protocols::wp::pointer_gestures::zv1::client::{
++    zwp_pointer_gesture_hold_v1::{self, ZwpPointerGestureHoldV1},
++    zwp_pointer_gestures_v1::ZwpPointerGesturesV1,
++};
++
++use sctk::compositor::SurfaceData;
++use sctk::globals::GlobalData;
++
++use crate::event::{TouchPhase, WindowEvent};
++use crate::platform_impl::wayland::state::WinitState;
++use crate::platform_impl::wayland::{self, DeviceId, WindowId};
++
++/// The pointer gestures manager, bound only at version 3, which has the hold.
++pub struct PointerGesturesState {
++    manager: ZwpPointerGesturesV1,
++}
++
++impl PointerGesturesState {
++    pub fn new(
++        globals: &GlobalList,
++        queue_handle: &QueueHandle<WinitState>,
++    ) -> Result<Self, BindError> {
++        let manager = globals.bind(queue_handle, 3..=3, GlobalData)?;
++        Ok(Self { manager })
++    }
++}
++
++impl Deref for PointerGesturesState {
++    type Target = ZwpPointerGesturesV1;
++
++    fn deref(&self) -> &Self::Target {
++        &self.manager
++    }
++}
++
++/// The window a hold began over, for its end, which names no surface.
++#[derive(Debug, Default)]
++pub struct HoldData {
++    window: Mutex<Option<WindowId>>,
++}
++
++impl Dispatch<ZwpPointerGesturesV1, GlobalData, WinitState> for PointerGesturesState {
++    fn event(
++        _state: &mut WinitState,
++        _proxy: &ZwpPointerGesturesV1,
++        _event: <ZwpPointerGesturesV1 as Proxy>::Event,
++        _data: &GlobalData,
++        _conn: &Connection,
++        _qhandle: &QueueHandle<WinitState>,
++    ) {
++    }
++}
++
++impl Dispatch<ZwpPointerGestureHoldV1, HoldData, WinitState> for PointerGesturesState {
++    fn event(
++        state: &mut WinitState,
++        _proxy: &ZwpPointerGestureHoldV1,
++        event: <ZwpPointerGestureHoldV1 as Proxy>::Event,
++        data: &HoldData,
++        _conn: &Connection,
++        _qhandle: &QueueHandle<WinitState>,
++    ) {
++        let (window_id, phase, time) = match event {
++            zwp_pointer_gesture_hold_v1::Event::Begin { time, surface, .. } => {
++                let parent = surface
++                    .data::<SurfaceData>()
++                    .and_then(|data| data.parent_surface().cloned())
++                    .unwrap_or(surface);
++                let window_id = wayland::make_wid(&parent);
++                *data.window.lock().unwrap() = Some(window_id);
++                (window_id, TouchPhase::Started, time)
++            },
++            zwp_pointer_gesture_hold_v1::Event::End { time, cancelled, .. } => {
++                let Some(window_id) = data.window.lock().unwrap().take() else { return };
++                let phase = if cancelled != 0 { TouchPhase::Cancelled } else { TouchPhase::Ended };
++                (window_id, phase, time)
++            },
++            _ => return,
++        };
++        let device_id = crate::event::DeviceId(crate::platform_impl::DeviceId::Wayland(DeviceId));
++        let time = Some(Duration::from_millis(u64::from(time)));
++        state
++            .events_sink
++            .push_window_event(WindowEvent::HoldGesture { device_id, phase, time }, window_id);
++    }
++}
++
++delegate_dispatch!(WinitState: [ZwpPointerGesturesV1: GlobalData] => PointerGesturesState);
++delegate_dispatch!(WinitState: [ZwpPointerGestureHoldV1: HoldData] => PointerGesturesState);
+diff --git a/src/platform_impl/linux/wayland/state.rs b/src/platform_impl/linux/wayland/state.rs
+index 13ef99c..f48e6b0 100644
+--- a/src/platform_impl/linux/wayland/state.rs
++++ b/src/platform_impl/linux/wayland/state.rs
+@@ -26,7 +26,7 @@ use sctk::subcompositor::SubcompositorState;
+ use crate::platform_impl::wayland::event_loop::sink::EventSink;
+ use crate::platform_impl::wayland::output::MonitorHandle;
+ use crate::platform_impl::wayland::seat::{
+-    PointerConstraintsState, RelativePointerState, TextInputState, WinitPointerData,
++    PointerConstraintsState, PointerGesturesState, RelativePointerState, TextInputState, WinitPointerData,
+     WinitPointerDataExt, WinitSeatState,
+ };
+ use crate::platform_impl::wayland::types::kwin_blur::KWinBlurManager;
+@@ -97,6 +97,9 @@ pub struct WinitState {
+     /// Relative pointer.
+     pub relative_pointer: Option<RelativePointerState>,
+ 
++    /// Pointer gestures, for the touchpad hold.
++    pub pointer_gestures: Option<PointerGesturesState>,
++
+     /// Pointer constraints to handle pointer locking and confining.
+     pub pointer_constraints: Option<Arc<PointerConstraintsState>>,
+ 
+@@ -182,6 +185,7 @@ impl WinitState {
+             text_input_state: TextInputState::new(globals, queue_handle).ok(),
+ 
+             relative_pointer: RelativePointerState::new(globals, queue_handle).ok(),
++            pointer_gestures: PointerGesturesState::new(globals, queue_handle).ok(),
+             pointer_constraints: PointerConstraintsState::new(globals, queue_handle)
+                 .map(Arc::new)
+                 .ok(),
+diff --git a/src/platform_impl/linux/x11/event_processor.rs b/src/platform_impl/linux/x11/event_processor.rs
+index 79f5c11..8f36f36 100644
+--- a/src/platform_impl/linux/x11/event_processor.rs
++++ b/src/platform_impl/linux/x11/event_processor.rs
+@@ -1090,6 +1090,7 @@ impl EventProcessor {
+                     _ => unreachable!(),
+                 },
+                 phase: TouchPhase::Moved,
++                time: None,
+             },
+             8 => WindowEvent::MouseInput { device_id, state, button: MouseButton::Back },
+ 
+@@ -1164,7 +1165,7 @@ impl EventProcessor {
+                     ScrollOrientation::Vertical => MouseScrollDelta::LineDelta(0.0, -delta as f32),
+                 };
+ 
+-                WindowEvent::MouseWheel { device_id, delta, phase: TouchPhase::Moved }
++                WindowEvent::MouseWheel { device_id, delta, phase: TouchPhase::Moved, time: None }
+             } else {
+                 WindowEvent::AxisMotion { device_id, axis: i as u32, value: unsafe { *value } }
+             };
 diff --git a/src/platform_impl/macos/ime_text.rs b/src/platform_impl/macos/ime_text.rs
 new file mode 100644
 index 0000000..8725e96
@@ -101,7 +398,7 @@ index 1b427a8..fff68ab 100644
  mod monitor;
  mod observer;
 diff --git a/src/platform_impl/macos/view.rs b/src/platform_impl/macos/view.rs
-index c7ca5bc..c83d635 100644
+index c7ca5bc..0f12cfb 100644
 --- a/src/platform_impl/macos/view.rs
 +++ b/src/platform_impl/macos/view.rs
 @@ -262,6 +262,16 @@ declare_class!(
@@ -186,7 +483,15 @@ index c7ca5bc..c83d635 100644
          }
  
          #[method(characterIndexForPoint:)]
-@@ -1140,3 +1174,32 @@ fn replace_event(event: &NSEvent, option_as_alt: OptionAsAlt) -> Retained<NSEven
+@@ -697,6 +731,7 @@ declare_class!(
+                 device_id: DEVICE_ID,
+                 delta,
+                 phase,
++                time: None,
+             });
+         }
+ 
+@@ -1140,3 +1175,32 @@ fn replace_event(event: &NSEvent, option_as_alt: OptionAsAlt) -> Retained<NSEven
          event.copy()
      }
  }
@@ -219,6 +524,85 @@ index c7ca5bc..c83d635 100644
 +    }
 +    out
 +}
+diff --git a/src/platform_impl/orbital/event_loop.rs b/src/platform_impl/orbital/event_loop.rs
+index 91f76e7..bb9df54 100644
+--- a/src/platform_impl/orbital/event_loop.rs
++++ b/src/platform_impl/orbital/event_loop.rs
+@@ -443,6 +443,7 @@ impl<T: 'static> EventLoop<T> {
+                         device_id: event::DeviceId(DeviceId),
+                         delta: event::MouseScrollDelta::LineDelta(x as f32, y as f32),
+                         phase: event::TouchPhase::Moved,
++                        time: None,
+                     },
+                 });
+             },
+diff --git a/src/platform_impl/web/event_loop/window_target.rs b/src/platform_impl/web/event_loop/window_target.rs
+index d741f09..eec1140 100644
+--- a/src/platform_impl/web/event_loop/window_target.rs
++++ b/src/platform_impl/web/event_loop/window_target.rs
+@@ -507,6 +507,7 @@ impl ActiveEventLoop {
+                         device_id: RootDeviceId(DeviceId(pointer_id)),
+                         delta,
+                         phase: TouchPhase::Moved,
++                        time: None,
+                     },
+                 },
+             )));
+diff --git a/src/platform_impl/windows/event_loop.rs b/src/platform_impl/windows/event_loop.rs
+index 6d60c1c..c20c285 100644
+--- a/src/platform_impl/windows/event_loop.rs
++++ b/src/platform_impl/windows/event_loop.rs
+@@ -1738,6 +1738,7 @@ unsafe fn public_window_callback_inner(
+                     device_id: DEVICE_ID,
+                     delta: LineDelta(0.0, value),
+                     phase: TouchPhase::Moved,
++                    time: None,
+                 },
+             });
+ 
+@@ -1758,6 +1759,7 @@ unsafe fn public_window_callback_inner(
+                     device_id: DEVICE_ID,
+                     delta: LineDelta(value, 0.0),
+                     phase: TouchPhase::Moved,
++                    time: None,
+                 },
+             });
+ 
+diff --git a/src/platform_impl/windows/keyboard_layout.rs b/src/platform_impl/windows/keyboard_layout.rs
+index 5340e43..6b4488b 100644
+--- a/src/platform_impl/windows/keyboard_layout.rs
++++ b/src/platform_impl/windows/keyboard_layout.rs
+@@ -48,6 +48,18 @@ use crate::platform_impl::{loword, primarylangid, scancode_to_physicalkey};
+ pub(crate) static LAYOUT_CACHE: Lazy<Mutex<LayoutCache>> =
+     Lazy::new(|| Mutex::new(LayoutCache::default()));
+ 
++/// Builds the layout cache's entry for the keyboard layout of thread `thread`, on the calling
++/// thread. The first key or mouse message a window's thread handles builds it otherwise (every
++/// virtual key through `ToUnicodeEx`, 8-10 ms), so a window's first input waited for it.
++pub(crate) fn warm_layout(thread: u32) {
++    let hkl = unsafe { GetKeyboardLayout(thread) } as u64;
++    if LAYOUT_CACHE.lock().unwrap().layouts.contains_key(&hkl) {
++        return;
++    }
++    let layout = LayoutCache::prepare_layout(hkl);
++    LAYOUT_CACHE.lock().unwrap().layouts.entry(hkl).or_insert(layout);
++}
++
+ fn key_pressed(vkey: VIRTUAL_KEY) -> bool {
+     unsafe { (GetKeyState(vkey as i32) & (1 << 15)) == (1 << 15) }
+ }
+diff --git a/src/platform_impl/windows/mod.rs b/src/platform_impl/windows/mod.rs
+index 9bb02fd..89a61a2 100644
+--- a/src/platform_impl/windows/mod.rs
++++ b/src/platform_impl/windows/mod.rs
+@@ -8,6 +8,7 @@ pub(crate) use self::event_loop::{
+ };
+ pub(crate) use self::icon::{SelectedCursor, WinIcon};
+ pub(crate) use self::keyboard::{physicalkey_to_scancode, scancode_to_physicalkey};
++pub(crate) use self::keyboard_layout::warm_layout;
+ pub(crate) use self::monitor::{MonitorHandle, VideoModeHandle};
+ pub(crate) use self::window::Window;
+ 
 diff --git a/src/platform_impl/windows/window.rs b/src/platform_impl/windows/window.rs
 index 228c6f0..1fcf1f2 100644
 --- a/src/platform_impl/windows/window.rs
@@ -310,55 +694,4 @@ index 8e24a4f..bfe251b 100644
 +
          if diff != WindowFlags::empty() {
              let (style, style_ex) = new.to_window_styles();
- 
-diff --git a/src/platform/windows.rs b/src/platform/windows.rs
---- a/src/platform/windows.rs
-+++ b/src/platform/windows.rs
-@@ -13,6 +13,14 @@ use crate::monitor::MonitorHandle;
- use crate::window::{BadIcon, Icon, Window, WindowAttributes};
- 
- /// Window Handle type used by Win32 API
-+/// Builds winit's keyboard-layout table for thread `thread_id`'s keyboard layout on the calling
-+/// thread, so the first key or mouse message that thread's windows handle doesn't build it (8-10
-+/// ms, every virtual key through `ToUnicodeEx`). Call it on a thread of its own at launch with
-+/// the UI thread's id.
-+pub fn warm_keyboard_layout(thread_id: u32) {
-+    crate::platform_impl::warm_layout(thread_id);
-+}
-+
- pub type HWND = isize;
- /// Menu Handle type used by Win32 API
- pub type HMENU = isize;
-diff --git a/src/platform_impl/windows/keyboard_layout.rs b/src/platform_impl/windows/keyboard_layout.rs
---- a/src/platform_impl/windows/keyboard_layout.rs
-+++ b/src/platform_impl/windows/keyboard_layout.rs
-@@ -48,6 +48,18 @@ use crate::platform_impl::{loword, primarylangid, scancode_to_physicalkey};
- pub(crate) static LAYOUT_CACHE: Lazy<Mutex<LayoutCache>> =
-     Lazy::new(|| Mutex::new(LayoutCache::default()));
- 
-+/// Builds the layout cache's entry for the keyboard layout of thread `thread`, on the calling
-+/// thread. The first key or mouse message a window's thread handles builds it otherwise (every
-+/// virtual key through `ToUnicodeEx`, 8-10 ms), so a window's first input waited for it.
-+pub(crate) fn warm_layout(thread: u32) {
-+    let hkl = unsafe { GetKeyboardLayout(thread) } as u64;
-+    if LAYOUT_CACHE.lock().unwrap().layouts.contains_key(&hkl) {
-+        return;
-+    }
-+    let layout = LayoutCache::prepare_layout(hkl);
-+    LAYOUT_CACHE.lock().unwrap().layouts.entry(hkl).or_insert(layout);
-+}
-+
- fn key_pressed(vkey: VIRTUAL_KEY) -> bool {
-     unsafe { (GetKeyState(vkey as i32) & (1 << 15)) == (1 << 15) }
- }
-diff --git a/src/platform_impl/windows/mod.rs b/src/platform_impl/windows/mod.rs
---- a/src/platform_impl/windows/mod.rs
-+++ b/src/platform_impl/windows/mod.rs
-@@ -8,6 +8,7 @@ pub(crate) use self::event_loop::{
- };
- pub(crate) use self::icon::{SelectedCursor, WinIcon};
- pub(crate) use self::keyboard::{physicalkey_to_scancode, scancode_to_physicalkey};
-+pub(crate) use self::keyboard_layout::warm_layout;
- pub(crate) use self::monitor::{MonitorHandle, VideoModeHandle};
- pub(crate) use self::window::Window;
  

@@ -226,7 +226,7 @@ impl<S: 'static> Runtime<S> {
         {
             let before = st.x.offset;
             st.x.offset = (st.x.offset + st.x.toward(by.0)).clamp(0.0, st.x.max);
-            st.x.v = 0.0;
+            st.x.stop();
             st.x.glide = None;
             st.moved();
             if st.x.offset != before {

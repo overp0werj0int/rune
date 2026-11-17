@@ -169,7 +169,7 @@ impl<S: 'static> Runtime<S> {
             };
             let laid = if axes.y() { self.ease_to_shrunk_end(i, overflow) } else { None };
             let Some(st) = self.scrolls.get_mut(&id) else { continue };
-            let _ = scroll_mode::step(&mut st.mode, ModeEvent::Step { x_v: st.x.v });
+            let _ = scroll_mode::step(&mut st.mode, ModeEvent::Step { x_v: st.x.coast() });
             st.max = overflow.max(0.0);
             match st.mode {
                 ScrollMode::Pinned(_) if sp.stick_bottom => {
@@ -187,6 +187,13 @@ impl<S: 'static> Runtime<S> {
                     moving = true;
                 }
                 ScrollMode::Momentum { .. } => st.mode = st.mode.to_rest(),
+                ScrollMode::Fling { mut fling, .. } => {
+                    let (delta, running) = fling.step(f64::from(dt));
+                    st.offset += delta;
+                    let edge = st.offset <= 0.0 || st.offset >= st.max;
+                    st.mode = if edge || !running { st.mode.to_rest() } else { st.mode.to_fling(fling) };
+                    moving = true;
+                }
                 ScrollMode::Pinned(_) | ScrollMode::Rest(_) => {}
             }
             st.offset = st.offset.clamp(0.0, st.max);

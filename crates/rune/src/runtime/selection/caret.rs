@@ -74,7 +74,7 @@ impl<S: 'static> Runtime<S> {
             let Some(st) = self.scrolls.get_mut(&self.nodes[v].id) else { continue };
             if horizontal {
                 st.x.offset = (st.x.offset + st.x.toward(-delta)).clamp(0.0, st.x.max);
-                st.x.v = 0.0;
+                st.x.stop();
                 st.x.glide = None;
             } else {
                 st.offset = (st.offset + delta).clamp(0.0, st.max);
