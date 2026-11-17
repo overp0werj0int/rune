@@ -102,7 +102,8 @@ impl Entry {
         let start = self.glyphs.len() as u32;
         if self.bytes {
             table.clear();
-            let mut x = line.metrics().offset;
+            // Glyph runs sit past the line's indent, so its clusters start there too.
+            let mut x = line.metrics().inline_min_coord + line.metrics().offset;
             for run in line.runs() {
                 for cl in run.visual_clusters() {
                     table.push((x, cl.text_range().start as u32));
