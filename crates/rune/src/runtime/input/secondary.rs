@@ -149,7 +149,8 @@ impl<S: 'static> Runtime<S> {
     /// The Menu key, or Shift+F10, that nothing before it took: the focused element's context
     /// menu. That is its focused link's `on_link_secondary`, else its own or its nearest
     /// ancestor's `on_secondary_press`, at the bottom-left of the focused link or element, where
-    /// a menu opens below it as AppKit's and Windows' keyboard menus do.
+    /// a menu opens below it as AppKit's and Windows' keyboard menus do. In a text field it opens
+    /// below the caret, as a text view's keyboard menu does, not at the field's far corner.
     pub(super) fn context_menu_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         let m = ev.mods;
         let plain = !m.cmd && !m.ctrl && !m.alt && !m.logo;
@@ -160,7 +161,13 @@ impl<S: 'static> Runtime<S> {
         };
         let Some(focused) = self.focused_index().filter(|&i| menu_key && self.can_focus(i)) else { return false };
         if self.focused_link_menu(focused, tx) { return true; }
-        let [x, _, _, y] = self.drawn_box(focused);
+        let (x, y) = match self.caret_rect(&self.nodes, focused) {
+            Some([cx, cy, _, ch]) => (cx, cy + ch),
+            None => {
+                let [x, _, _, y] = self.drawn_box(focused);
+                (x, y)
+            }
+        };
         let n = &self.nodes[focused];
         if n.handlers.on_secondary_press.is_none() && n.input.as_ref().is_some_and(|i| i.access.is_some()) {
             return self.field_menu(n.path.clone(), (x, y), None, tx);
