@@ -433,8 +433,10 @@ impl<S: 'static> Runtime<S> {
                 self.text.decorations_with_rings(layout, spans, drawn_rings.as_deref().unwrap_or(&spec.cold.rings), spec.cold.span_radius, s, d_origin, &mut self.deco_scratch);
                 let drawn_len = n.elided.map_or(spec.content.len(), |e| e.drawn_len(spec.content.len()));
                 if !spec.cold.highlights.is_empty() {
-                    let drawn = n.elided.map(|e| e.highlights(&spec.cold.highlights));
-                    self.text.highlight_decorations(layout, drawn.as_deref().unwrap_or(&spec.cold.highlights), drawn_len, s, d_origin, &mut self.deco_scratch);
+                    // A paragraph paints only the highlights over its own words, on its own bytes.
+                    let here = piece.highlights(&spec.cold.highlights);
+                    let drawn = n.elided.map(|e| e.highlights(&here));
+                    self.text.highlight_decorations(layout, drawn.as_deref().unwrap_or(&here), piece.shaped_len(drawn_len), s, d_origin, &mut self.deco_scratch);
                 }
                 if !strikes.is_empty() {
                     let drawn = n.elided.map(|e| e.strikes(&strikes));
@@ -662,9 +664,10 @@ impl<S: 'static> Runtime<S> {
                         f = c;
                     }
                     if has_hl_fg
+                        && let at = piece.content(q.byte as usize)
                         && let Some(c) = spec.cold.highlights.iter().rev().find_map(|h| {
                             let (a, b) = n.elided.map_or((h.start as usize, h.end as usize), |e| e.mark(h.start as usize, h.end as usize, false));
-                            ((q.byte as usize) >= a && (q.byte as usize) < b).then_some(h.fg).flatten()
+                            (at >= a && at < b).then_some(h.fg).flatten()
                         })
                     {
                         f = premul(c, o, srgb);
