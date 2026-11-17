@@ -1,5 +1,5 @@
-//! A held press extending a selection keeps scrolling its list while the pointer stays at or past
-//! the list's top or bottom edge, as an AppKit text view autoscrolls on its periodic events: each
+//! A held press extending a selection, of selectable text or inside a text field, keeps
+//! scrolling its list while the pointer stays at or past the list's top or bottom edge, as an AppKit text view autoscrolls on its periodic events: each
 //! step moves the list by an amount that grows with how far past the edge the pointer is. A step
 //! is a timer: [`step`] keeps its `Attempt` and asks for the next frame, which feeds it back as
 //! `Due`. The frame that takes a step scrolls, lays the list out, and only then extends the
@@ -207,12 +207,15 @@ impl<S: 'static> Runtime<S> {
     /// The held pointer moved to height `y`: step while it's at or past an edge the selection's
     /// viewport can still scroll past, and stop when it isn't.
     pub(in crate::runtime) fn edge_scroll_moved(&mut self, y: f32) {
-        if !self.selectable.phase.dragging() && self.selectable.edge.state == State::Idle { return; }
+        if !self.edge_dragging() && self.selectable.edge.state == State::Idle { return; }
         let edge = self.edge_at(y);
         let now = self.now_clock();
         let effects = self.selectable.edge.step(Event::Moved { now, edge });
         self.carry_edge_scroll(effects);
     }
+
+    /// A held press is extending a selection: of selectable text, or inside a text field.
+    fn edge_dragging(&self) -> bool { self.selectable.phase.dragging() || self.input_click.dragging_path().is_some() }
 
     /// The drag ended.
     pub(in crate::runtime) fn stop_edge_scroll(&mut self) { let _ = self.selectable.edge.step(Event::Stop); }
@@ -265,7 +268,9 @@ impl<S: 'static> Runtime<S> {
         for effect in effects {
             match effect {
                 Effect::Scroll { scroll, by } => self.edge_scroll_by(scroll, by),
-                Effect::Extend => if let Some((x, y)) = self.pointer { self.selection_drag(x, y) },
+                Effect::Extend => if let Some((x, y)) = self.pointer {
+                    if self.input_click.dragging_path().is_some() { self.input_drag(x, y, true) } else { self.selection_drag(x, y) }
+                },
                 Effect::WakeAt(due) => self.wake_at(due),
             }
         }
@@ -286,8 +291,11 @@ impl<S: 'static> Runtime<S> {
     /// held press is extending: at or past its top or bottom (as drawn, inside its clips and the
     /// window), how fast that scrolls, and how far it still can.
     fn edge_at(&self, y: f32) -> Option<Edge> {
-        if !self.selectable.phase.dragging() || !self.press.is_held() { return None; }
-        let holder = self.selection_holder()?;
+        if !self.edge_dragging() || !self.press.is_held() { return None; }
+        let holder = match self.input_click.dragging_path() {
+            Some(path) => self.nodes.iter().position(|n| n.path == path && n.input.is_some())?,
+            None => self.selection_holder()?,
+        };
         let i = std::iter::successors(Some(holder), |&p| self.nodes[p].parent)
             .find(|&p| self.nodes[p].scroll.is_some() && self.nodes[p].scroll_axes.has(false))?;
         let id = self.nodes[i].id;
