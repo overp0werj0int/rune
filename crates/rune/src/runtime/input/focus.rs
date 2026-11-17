@@ -20,10 +20,12 @@ const CLAMPED_ROLES: [&str; 3] = ["list", "tree", "grid"];
 const LANDMARK_ROLES: [&str; 6] = ["banner", "navigation", "main", "complementary", "form", "search"];
 const PRESSABLE_ROLES: [&str; 9] = ["button", "link", "tab", "checkbox", "switch", "radio", "combobox", "treeitem", "gridcell"];
 /// The innermost open modal and the nodes input may reach while it shows: its subtree, the
-/// popovers anchored inside it, and the window's caption buttons.
+/// popovers anchored inside it, and the window's caption buttons. `kept`: the subtrees outside
+/// it that the pointer alone still reaches (`El::modal_keeps`).
 pub(super) struct ModalScope {
     index: usize,
     members: Vec<bool>,
+    kept: Vec<bool>,
 }
 
 /// Whether `ev` navigates (Tab, an arrow, Home, End, Page Up or Page Down, unmodified but for
@@ -83,6 +85,10 @@ impl<S: 'static> Runtime<S> {
     pub(crate) fn modal_member(&self, i: usize) -> bool {
         self.modal_scope.as_ref().is_none_or(|m| m.members.get(i).copied().unwrap_or(false))
     }
+    /// Node `i` is inside the open modal's scope or a subtree it keeps live to the pointer.
+    fn modal_pointer_member(&self, i: usize) -> bool {
+        self.modal_scope.as_ref().is_none_or(|m| m.members.get(i).copied().unwrap_or(false) || m.kept.get(i).copied().unwrap_or(false))
+    }
     pub(super) fn refresh_modal_index(&mut self) {
         let Some(index) = self.nodes.iter().enumerate().rev()
             .find(|(i, n)| n.handlers.get().is_some_and(|h| h.modal.is_some()) && !self.subtree_exiting(*i) && !self.subtree_unmounted(*i)).map(|(i, _)| i)
@@ -108,11 +114,21 @@ impl<S: 'static> Runtime<S> {
             }
             if !changed { break; }
         }
-        self.modal_scope = Some(ModalScope { index, members });
+        let keeps = self.nodes[index].handlers.get().and_then(|h| h.modal.as_ref()).map(|m| m.keeps.clone()).unwrap_or_else(|| std::rc::Rc::new([]));
+        let mut kept = vec![false; self.nodes.len()];
+        if !keeps.is_empty() {
+            for (i, n) in self.nodes.iter().enumerate() {
+                kept[i] = !members[i] && !self.subtree_exiting(i)
+                    && (n.key.as_deref().is_some_and(|k| keeps.iter().any(|w| w == k)) || n.parent.is_some_and(|p| kept[p]));
+            }
+        }
+        self.modal_scope = Some(ModalScope { index, members, kept });
     }
-    /// Input may reach node `i`: it's outside any `El::inert` subtree and not behind a modal.
+    /// Input may reach node `i`: it's outside any `El::inert` subtree and not behind a modal,
+    /// or in a subtree the modal keeps live to the pointer. Keyboard focus also needs
+    /// `modal_member`.
     pub(super) fn allowed(&self, i: usize) -> bool {
-        !self.nodes.get(i).is_some_and(|n| n.inert) && self.modal_member(i)
+        !self.nodes.get(i).is_some_and(|n| n.inert) && self.modal_pointer_member(i)
     }
     /// `El::focusable`, or under `Cx::web_focus` a pressable control that didn't opt out.
     pub(super) fn takes_focus(&self, n: &Node) -> bool {
@@ -120,7 +136,7 @@ impl<S: 'static> Runtime<S> {
     }
     pub(super) fn can_focus(&self, i: usize) -> bool {
         let n = &self.nodes[i];
-        (self.takes_focus(n) || n.input.as_ref().is_some_and(|s| s.access.is_some())) && self.reachable(i)
+        (self.takes_focus(n) || n.input.as_ref().is_some_and(|s| s.access.is_some())) && self.reachable(i) && self.modal_member(i)
     }
     /// Shown, sized, not exiting and not behind a modal.
     fn reachable(&self, i: usize) -> bool {

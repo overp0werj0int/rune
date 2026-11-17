@@ -79,6 +79,8 @@ impl crate::cold::Empty for FocusSpec {
 pub(crate) struct ModalSpec {
     pub dismiss: PressFn,
     pub outside: bool,
+    /// Keys of elements outside the modal that the pointer still reaches (`El::modal_keeps`).
+    pub keeps: Rc<[String]>,
 }
 
 impl El {
@@ -262,18 +264,29 @@ impl El {
     /// Trap focus and make the background inert while mounted. Escape requests dismissal.
     pub fn modal<S: 'static>(mut self, click_outside: bool, dismiss: impl Fn(&mut S) + 'static) -> Self {
         self.handlers.modal = Some(ModalSpec { outside: click_outside,
-            dismiss: Rc::new(move |s, _| dismiss(downcast::<S>(s))) });
+            dismiss: Rc::new(move |s, _| dismiss(downcast::<S>(s))), keeps: Rc::new([]) });
         self
     }
     /// [`El::modal`] whose dismissal gets the change's [`Tx`]: a dialog that closes at once
     /// (`tx.instant()`), say.
     pub fn modal_tx<S: 'static>(mut self, click_outside: bool, dismiss: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
         self.handlers.modal = Some(ModalSpec { outside: click_outside,
-            dismiss: Rc::new(move |s, tx| dismiss(downcast::<S>(s), tx)) });
+            dismiss: Rc::new(move |s, tx| dismiss(downcast::<S>(s), tx)), keeps: Rc::new([]) });
         self
     }
     pub fn modal_click_outside(mut self, enabled: bool) -> Self {
         if let Some(h) = self.handlers.get_mut_if_some() && let Some(m) = &mut h.modal { m.outside = enabled; }
+        self
+    }
+    /// The elements keyed `keys` outside this modal, and what is inside them, stay live to the
+    /// pointer while it shows: they hover, show their help and take presses, as a window's
+    /// title bar stays live over a sheet. The keyboard stays in the modal: Tab, focus and keys
+    /// never reach them, nor does assistive technology, and a wheel over the rest of the window
+    /// still scrolls nothing. Call it after [`El::modal`].
+    pub fn modal_keeps<K: Into<String>>(mut self, keys: impl IntoIterator<Item = K>) -> Self {
+        if let Some(h) = self.handlers.get_mut_if_some() && let Some(m) = &mut h.modal {
+            m.keeps = keys.into_iter().map(Into::into).collect();
+        }
         self
     }
 }

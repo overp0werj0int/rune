@@ -110,13 +110,13 @@ impl<S: 'static> Runtime<S> {
         // menu handed focus back to its trigger as its pick opened this modal (`Tx::return_focus`,
         // which a web menu does only after the dialog has noted the item): closing returns to
         // what had focus before.
-        let inside = self.focused_index().is_some_and(|j| self.allowed(j));
+        let inside = self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j));
         let restore = if inside || returned { self.focus_before_commit.clone() } else { self.focus.owned() };
         let menu = |j: usize| MENU_ROLES.contains(&self.nodes[j].role);
         let is_menu = menu(i) || (i + 1..self.nodes.len()).take_while(|&j| self.nodes[j].parent.is_some_and(|p| p >= i)).any(|j| self.nodes[j].parent == Some(i) && menu(j));
         let opened = if is_menu && !self.focus.keyboard() { Opened::PointerMenu } else { Opened::Dialog };
         self.modal_step(ModalEvent::Opened { path, restore, opened });
-        if !self.focused_index().is_some_and(|j| self.allowed(j)) {
+        if !self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j)) {
             self.modal_step(ModalEvent::FocusOutside);
         }
     }
