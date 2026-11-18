@@ -150,7 +150,8 @@ impl<S: 'static> Runtime<S> {
     /// menu. That is its focused link's `on_link_secondary`, else its own or its nearest
     /// ancestor's `on_secondary_press`, at the bottom-left of the focused link or element, where
     /// a menu opens below it as AppKit's and Windows' keyboard menus do. In a text field it opens
-    /// below the caret, as a text view's keyboard menu does, not at the field's far corner.
+    /// below the caret, as a text view's keyboard menu does, not at the field's far corner. A
+    /// menu it opens comes from the keyboard, so its first item shows focus.
     pub(super) fn context_menu_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         let m = ev.mods;
         let plain = !m.cmd && !m.ctrl && !m.alt && !m.logo;
@@ -180,6 +181,9 @@ impl<S: 'static> Runtime<S> {
                 let path = n.path.clone();
                 let point = self.pointer_event(index, x, y);
                 log_event!(self, "secondary press {path}");
+                // A menu the keyboard opened marks its first item, as a menu opened by Tab or
+                // the arrows would.
+                self.focus.step(super::focus_machine::FocusEvent::Navigated);
                 f(states!(self), point, tx);
                 return true;
             }
