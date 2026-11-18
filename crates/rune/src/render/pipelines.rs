@@ -57,7 +57,7 @@ impl Renderer {
         let instances = Self::instance_buffer(device, capacity);
         let spring_instances = properties.map_or(0, |(_, ids)| ids.len());
         let springs = properties.map(|(nodes, ids)| crate::gpu::springs::Bindings::new(device, spring_layout.as_ref().unwrap(), nodes, ids));
-        Renderer {
+        let mut renderer = Renderer {
             surfaces: None,
             surfaces_building: None,
             pipeline,
@@ -102,7 +102,9 @@ impl Renderer {
             clear_quad: std::sync::OnceLock::new(),
             #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
             damage: Default::default(),
-        }
+        };
+        renderer.build_isolation_ahead(device);
+        renderer
     }
 
     pub(super) fn pipeline(

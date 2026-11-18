@@ -7,6 +7,11 @@
 //!
 //! A native device answers at once. A browser's error scopes answer a little later, so on the
 //! web a frame or two draw that fallback while the answer comes (`Renderer::checking_gpu`).
+//!
+//! An isolated layer's pipelines take tens of milliseconds to make (Vulkan translates the uber
+//! shader again for each), which the first frame to fade a group would wait for. Natively a
+//! renderer makes them on a thread of its own from when it is made, checked in that thread's
+//! error scopes, and the first frame that needs them takes them, waiting if they aren't done.
 
 use std::sync::{Arc, Mutex};
 use crate::machine::{Attempt, Effects, Seq};
@@ -111,6 +116,8 @@ pub(super) struct Breakers {
     isolation: Health,
     plus_lighter: Health,
     layer_blur: Health,
+    /// The isolated layers' pipelines being made ahead (`Renderer::build_isolation_ahead`).
+    ahead: Option<std::sync::mpsc::Receiver<Ahead>>,
     /// Tests: build this feature's pipelines broken, as a device that refuses them would.
     #[cfg(test)]
     pub refuse: Option<Feature>,
@@ -140,6 +147,15 @@ impl Breakers {
     }
 }
 
+/// The isolated layers' pipelines made ahead: the uber pipeline for their targets, the
+/// composites into the renderer's format and theirs, and the error the device caught, if any.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(super) struct Ahead {
+    target: Option<wgpu::RenderPipeline>,
+    composites: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+    error: Option<String>,
+}
+
 const FEATURES: [Feature; 3] = [Feature::Isolation, Feature::PlusLighter, Feature::LayerBlur];
 
 impl Renderer {
@@ -159,7 +175,45 @@ impl Renderer {
     /// The uber shader changed: the features built from it are built again, and checked again,
     /// when a frame next needs them.
     pub(super) fn shader_changed(&mut self, device: &wgpu::Device) {
+        self.breakers.ahead = None;
         for feature in [Feature::Isolation, Feature::PlusLighter] { self.run_breaker(device, feature, Event::ShaderChanged); }
+        self.build_isolation_ahead(device);
+    }
+
+    /// Starts making the isolated layers' pipelines from the shader the renderer has now, on a
+    /// thread of its own, unless they're built. Lib tests build them in place, so a build
+    /// `Breakers::refuse` breaks stays broken.
+    pub(super) fn build_isolation_ahead(&mut self, device: &wgpu::Device) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if cfg!(test) || !matches!(self.breakers.isolation, Health::Untried) { return; }
+            let (sent, done) = std::sync::mpsc::channel();
+            let (device, layout, format, entry) = (device.clone(), self.layout.clone(), self.format, self.vertex_entry);
+            let shader = super::dxbc::Shaders { vertex: self.shader.vertex.clone(), fragment: self.shader.fragment.clone() };
+            let spawned = std::thread::Builder::new().name("rune-layer-pipelines".into()).spawn(move || {
+                let mut made = Ahead { target: None, composites: Vec::new(), error: None };
+                let verdict = checked(&device, || {
+                    made.target = Some(Self::pipeline(&device, &layout, &shader, FORMAT, entry, Blend::SourceOver));
+                    let formats: &[_] = if format == FORMAT { &[FORMAT] } else { &[format, FORMAT] };
+                    for &f in formats { made.composites.push((f, Self::pipeline(&device, &layout, &shader, f, "vs", Blend::SourceOver))); }
+                });
+                if let Verdict::Now(error) = verdict { made.error = error; }
+                sent.send(made).ok();
+            });
+            if spawned.is_ok() { self.breakers.ahead = Some(done); }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = device;
+    }
+
+    /// Puts the isolated layers' pipelines made ahead in place, once their thread has made them:
+    /// None when none were made ahead, or else the error the device caught making them.
+    fn take_isolation_ahead(&mut self) -> Option<Option<String>> {
+        let made = self.breakers.ahead.take()?.recv().ok()?;
+        if made.error.is_some() { return Some(made.error); }
+        if let Some(target) = made.target && !self.extra.iter().any(|(f, _)| *f == FORMAT) { self.extra.push((FORMAT, target)); }
+        for (format, pipeline) in made.composites { self.take_layer_pipeline(format, pipeline); }
+        Some(None)
     }
 
     /// Steps `feature`'s breaker on `event` and carries out what it asks, until nothing is left.
@@ -168,7 +222,12 @@ impl Renderer {
         while let Some(effect) = queue.pop_front() {
             match effect {
                 Effect::Build => {
-                    let verdict = checked(device, || self.build_feature(device, feature));
+                    let ahead = if feature == Feature::Isolation { self.take_isolation_ahead() } else { None };
+                    let verdict = match ahead {
+                        Some(Some(error)) => Verdict::Now(Some(error)),
+                        // Builds what wasn't made ahead: all of it, or a format added since.
+                        _ => checked(device, || self.build_feature(device, feature)),
+                    };
                     queue.extend(self.breakers.step(feature, Event::Built(verdict)));
                 }
                 Effect::Drop => self.drop_feature(feature),

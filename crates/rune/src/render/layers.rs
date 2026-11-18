@@ -696,6 +696,11 @@ impl Renderer {
         for t in self.layers.targets.iter_mut().flatten().chain(&mut self.layers.retained).chain(&mut self.layers.spare) { t.blur = None; }
     }
 
+    /// Takes `pipeline`, made ahead (`breaker`), as the composite into `format`, unless one is.
+    pub(super) fn take_layer_pipeline(&mut self, format: wgpu::TextureFormat, pipeline: wgpu::RenderPipeline) {
+        if !self.layers.pipelines.iter().any(|(f, _)| *f == format) { self.layers.pipelines.push((format, pipeline)); }
+    }
+
     pub(super) fn add_layer_format(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
         if !self.layers.pipelines.iter().any(|(f, _)| *f == format) {
             self.layers.pipelines.push((format, Self::pipeline(device, &self.layout, &self.shader, format, "vs", Blend::SourceOver)));
