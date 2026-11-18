@@ -276,7 +276,10 @@ impl<S: 'static> Host<S> {
         self.fn_key();
         self.flush_files(event_loop);
         // Another window switched the font families (`Tx::set_font_families`).
-        if self.rt.follow_font_families() && let Some(w) = &self.win { w.request_redraw(); }
+        if self.rt.follow_font_families() && let Some(w) = &mut self.win {
+            w.loop_frame.touched();
+            w.request_redraw();
+        }
         // Process queued hide/close requests before completing a pending first reveal.
         self.first_frame_ready(event_loop);
         if !self.win.as_ref().is_some_and(|w| self.life.shown() || w.first_frame.revealing()) {
@@ -288,8 +291,9 @@ impl<S: 'static> Host<S> {
         // adapter, one a turn, none while input waits; the loop turns again while some are owed.
         #[cfg(target_os = "windows")]
         return self.post_frame_turn();
+        // Elsewhere `on_ready` ran with the first frame; a view asked to be prepared since runs now.
         #[cfg(not(target_os = "windows"))]
-        false
+        { !crate::marks::counting() && self.rt.text_idle_owed() && self.rt.text_idle_turn() }
     }
 
     fn resumed_in_turn(&mut self, event_loop: &ActiveEventLoop) {

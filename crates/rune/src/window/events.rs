@@ -122,8 +122,10 @@ impl<S: 'static> Host<S> {
         if !self.started { return; }
         // The display tick a timer's frame waits for draws that frame.
         if !matches!(event, WakeEvent::DisplayTick(_)) && let Some(w) = &mut self.win { w.timer_frame.no_longer_quiet(); }
+        if !matches!(event, WakeEvent::DisplayTick(_) | WakeEvent::FrameSlot(_)) && let Some(w) = &mut self.win { w.loop_frame.touched(); }
         match event {
             WakeEvent::App(_) => {
+                self.app_woken.store(false, std::sync::atomic::Ordering::Relaxed);
                 self.drain(event_loop, true);
             }
             WakeEvent::DisplayTick(_) => {
@@ -212,7 +214,10 @@ impl<S: 'static> Host<S> {
             WindowEvent::Focused(true) | WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => self.look_stale(),
             _ => {}
         }
-        if !matches!(event, WindowEvent::RedrawRequested) && let Some(w) = &mut self.win { w.timer_frame.no_longer_quiet(); }
+        if !matches!(event, WindowEvent::RedrawRequested) && let Some(w) = &mut self.win {
+            w.timer_frame.no_longer_quiet();
+            w.loop_frame.touched();
+        }
         #[cfg(target_os = "macos")]
         if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Occluded(_))
             && let Some(w) = &mut self.win && let Some(pacing) = &mut w.native.pacing {
@@ -457,13 +462,21 @@ impl<S: 'static> Host<S> {
                 let points = crate::runtime::LINE_POINTS;
                 let (dx, dy) = crate::runtime::wheel_delta(delta, scale, shift, points);
                 let precise = matches!(delta, winit::event::MouseScrollDelta::PixelDelta(_));
+                // Whole lines are a notched wheel; a free-spinning wheel or a precision touchpad
+                // sends fractions (the run decides, `WheelLock::notched`). On Linux winit gives a
+                // wheel's detents as whole lines too (X11's buttons 4-7 and XInput2's position over
+                // its increment, Wayland's discrete values) and a touchpad's as fractions (XInput2)
+                // or pixels (Wayland's finger and continuous sources). macOS scrolls a notch at once,
+                // as Chromium there does.
+                let notch = cfg!(any(target_os = "windows", target_os = "linux"))
+                    && matches!(delta, winit::event::MouseScrollDelta::LineDelta(x, y) if x.fract() == 0.0 && y.fract() == 0.0);
                 let phase = gesture_phase(phase);
                 match rt.pointer() {
                     // Off macOS a trackpad pinch is a Ctrl + wheel.
                     Some((x, y)) if !cfg!(target_os = "macos") && self.mods.control_key() && rt.pinch_wheel(x, y, dy) => {}
                     Some((x, y)) => rt.wheel_event(crate::WheelEvent {
                         time: time.map(|t| t.as_secs_f64()),
-                        ..crate::WheelEvent::new(dx / rt.zoom(), dy / rt.zoom()).at(x, y).mods(map_mods(self.mods)).phase(phase).precise(precise)
+                        ..crate::WheelEvent::new(dx / rt.zoom(), dy / rt.zoom()).at(x, y).mods(map_mods(self.mods)).phase(phase).precise(precise).notch(notch)
                     }),
                     None if phase == crate::GesturePhase::Began => rt.wheel_began(),
                     None if phase == crate::GesturePhase::Ended => rt.wheel_ended(),

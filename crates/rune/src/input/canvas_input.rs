@@ -39,6 +39,9 @@ pub struct WheelEvent {
     /// When the platform says the frame happened, in seconds on its own input clock (Wayland's
     /// event time), where it says so. A trackpad's release velocity is measured on it.
     pub time: Option<f64>,
+    /// Whole notches of a mouse wheel on a platform whose browsers ease them (Windows): an
+    /// unclaimed delta eases there as Chromium's does (`Runtime::set_wheel_glide`).
+    pub notch: bool,
 }
 
 impl WheelEvent {
@@ -50,6 +53,7 @@ impl WheelEvent {
     pub fn phase(mut self, phase: GesturePhase) -> Self { self.phase = phase; self }
     pub fn precise(mut self, precise: bool) -> Self { self.precise = precise; self }
     pub fn time(mut self, seconds: f64) -> Self { self.time = Some(seconds); self }
+    pub fn notch(mut self, notch: bool) -> Self { self.notch = notch; self }
 }
 
 /// A pinch an [`El::on_magnify`] handler sees.

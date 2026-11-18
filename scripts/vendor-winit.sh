@@ -5,7 +5,8 @@
 # DLLs on its UI thread before its first frame; and a window given a position is made there, at
 # its display's scale, not moved there and resized; and a new window's system menu, whose Close
 # is already enabled, isn't copied for the window just to enable it again; and a window is made
-# with the minimize and maximize boxes it asks for, not given them by a second style change; and on macOS the input method reads the app's text around its selection, to convert it again, and its marked text's clauses reach the app, beside `Ime::Preedit`, through `platform::macos::{set_ime_text, take_ime_clauses, take_ime_replacement}`; and on Wayland
+# with the minimize and maximize boxes it asks for, not given them by a second style change; and winit's own
+# helper window is cloaked, so screen readers and window pickers don't meet it; and on macOS the input method reads the app's text around its selection, to convert it again, and its marked text's clauses reach the app, beside `Ime::Preedit`, through `platform::macos::{set_ime_text, take_ime_clauses, take_ime_replacement}`; and on Wayland
 # a touchpad scroll is scaled by 12 as Chromium scales it, each scroll event carries its own
 # time (`WindowEvent::MouseWheel::time`), and fingers resting on the touchpad arrive as
 # `WindowEvent::HoldGesture` from `zwp_pointer_gesture_hold_v1`, for the fling's release and stop). Run it when winit is bumped, then build: a patch

@@ -488,7 +488,8 @@ impl<S: 'static> Runtime<S> {
         let shaped0 = self.text.shaped;
         self.settled = false;
         self.landing_holds.clear();
-        self.clock = self.wall_clock().unwrap_or(self.clock + elapsed);
+        // `RUNE_LOOP_CHECK=1`: the frame that runs instead of a checked step samples at its clock.
+        self.clock = self.paint_keep.cycles.check_clock.take().unwrap_or_else(|| self.wall_clock().unwrap_or(self.clock + elapsed));
         if self.wall_start.is_none() {
             crate::video::headless_frame(self.clock);
             // Fake recorders publish this frame's level to bound meters, drawn this frame.
@@ -591,7 +592,7 @@ impl<S: 'static> Runtime<S> {
                     if ran_other || self.dirty || ran_layout { self.live_check = None; }
                     self.capture_keeps(&mut tx);
                     tx.unprompted = self.motion_needs_cause && why & CommitWhy::INPUT == 0 && !tx.asked_motion;
-                    if split && tx.unprompted { tx.commit = tx.commit.instant(); }
+                    if split && tx.unprompted { tx.commit = tx.commit.without_input(); }
                     if routed { why |= CommitWhy::ROUTE; }
                     if self.dirty { why |= CommitWhy::DIRTY; }
                     self.commit_for(&tx, std::mem::take(&mut why));
@@ -607,6 +608,7 @@ impl<S: 'static> Runtime<S> {
                     tx.commit = Commit::Animate;
                     tx.unprompted = false;
                     tx.asked_motion = false;
+                    tx.live_growth.clear(); tx.tail_rooms.clear();
                     tx.motion = None;
                     tx.color_motion = None;
                     tx.follow_edge = false;
@@ -692,7 +694,7 @@ impl<S: 'static> Runtime<S> {
             tx.unprompted = self.motion_needs_cause && why & CommitWhy::INPUT == 0 && !tx.asked_motion;
             // Its layout lands too, as an instant change's does: a container that grows to fit what a
             // server brought doesn't ease to its height (motion already running keeps on).
-            if tx.unprompted { tx.commit = tx.commit.instant(); }
+            if tx.unprompted { tx.commit = tx.commit.without_input(); }
             self.commit_for(&tx, why | flag(self.dirty, CommitWhy::DIRTY) | flag(self.relayout, CommitWhy::RELAYOUT) | flag(self.settle, CommitWhy::SETTLE)
                 | flag(shifted, CommitWhy::VIRTUAL) | flag(ran_layout, CommitWhy::LAYOUT) | flag(read_moved, CommitWhy::READ));
             #[cfg(debug_assertions)]
@@ -774,7 +776,7 @@ impl<S: 'static> Runtime<S> {
         self.scene.set_time(self.t);
         self.caught_up += step as f32;
         self.step_growth(step as f32);
-        self.step_scroll(step as f32);
+        self.step_scroll_by(step as f32, true);
     }
 
     pub(super) fn step_motion(&mut self, dt: f64, instant_scroll: bool) -> bool {
@@ -868,6 +870,7 @@ impl<S: 'static> Runtime<S> {
         animating |= source(self.scale_frame.is_some() || self.pixel_snap.easing(), AnimSource::SCALE_SETTLE);
         animating |= source(self.videos_active, AnimSource::VIDEO);
         animating |= source(self.draw_text_flights(), AnimSource::TEXT_FLIGHT);
+        animating |= source(self.text_fill_due(), AnimSource::TEXT_FILL);
         if !animating && raster_check::on() {
             self.check_resting_raster();
         }

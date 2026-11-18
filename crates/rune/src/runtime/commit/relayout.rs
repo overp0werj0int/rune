@@ -129,7 +129,7 @@ impl<S: 'static> Measurement<'_, S> {
         nodes.clear();
         nodes.reserve(len);
         for slot in self.nodes.iter_mut() {
-            if slot.input.is_some() || slot.is_secure() {
+            if slot.input.is_some() || slot.is_secure() || slot.text.as_ref().is_some_and(|t| t.by_paragraph(false)) {
                 // The new nodes lay their text out again; the cache then holds the only reference.
                 // A by-paragraph field's goes with it, to re-break its paragraphs from.
                 let kept = slot.text_layout.take().filter(|l| matches!(l, TextLayout::Paragraphs(_)));
@@ -360,8 +360,9 @@ pub(super) fn lay_out_text(text: &mut TextSystem, n: &mut Node, w: f32, scale: f
     // A by-paragraph field keeps what its last layout (still on it) shares with this one.
     let mut layout = match text.layout_text(spec, n.input.is_some(), scale, wrap, line_alignment(spec), n.text_layout.as_ref()) {
         TextLayout::Single(l) => l,
-        paragraphs => {
-            n.text_layout = Some(paragraphs);
+        TextLayout::Paragraphs(mut p) => {
+            text.prepare_highlights(&mut p, &spec.cold.highlights);
+            n.text_layout = Some(TextLayout::Paragraphs(p));
             n.elided = None;
             return;
         }

@@ -113,6 +113,12 @@ pub(super) struct Inherit {
     /// The translation in points from scrolls, sticky shifts and growth rows above, which
     /// snaps as a whole.
     pub rigid: [f32; 2],
+    /// `rigid` less the scrolls' offsets, the sticky shifts and the growth offsets (`row_dy`: rows'
+    /// and stacks' windows'): the paint containments' origins alone (overlays start it again at
+    /// zero). A text lays out from its exact place against this, so while rows glide or a list
+    /// scrolls it moves in whole pixels with its box, as one piece with the lines and borders
+    /// beside it, and at rest it sits against its box the same way wherever the list is.
+    pub steady: [f32; 2],
     /// The origin in points of the paint containment above (`El::paint_contained`), which is
     /// part of `rigid`: what draws from its own exact box rounds against it too.
     pub contain: [f32; 2],
@@ -131,11 +137,34 @@ pub(super) struct Inherit {
 }
 
 impl Inherit {
+    /// A translation that moves the subtree as a scroll does, `by` points on `axis`: a scroll's
+    /// drawn offset, a sticky shift (which, while stuck, cancels the scroll's motion), or a page's
+    /// band. It moves the subtree's boxes, which round it with the rest of `rigid`, and not what
+    /// its text lays out against, so text moves in whole pixels with its box, as Chromium draws a
+    /// scroller's contents from its pixel-snapped offset.
+    pub(super) fn scroll(&mut self, axis: usize, by: f32) {
+        self.rigid[axis] += by;
+    }
+
+    /// A growth offset `dy`: a row's, which glides, or a stack's own, its virtual window's, which
+    /// moves as a scroll does. Either moves its boxes but not what its text lays out against.
+    pub(super) fn grow(&mut self, dy: f32) {
+        self.rigid[1] += dy;
+    }
+
+    /// `El::paint_contained` at `o` (points): its children snap against it, rounded on its own.
+    pub(super) fn contain_at(&mut self, o: [f32; 2]) {
+        let c = self.contain;
+        self.rigid = [self.rigid[0] - c[0] + o[0], self.rigid[1] - c[1] + o[1]];
+        self.steady = [self.steady[0] - c[0] + o[0], self.steady[1] - c[1] + o[1]];
+        self.contain = o;
+    }
+
     /// Its bits, for `paint_keep`'s comparison of what a subtree inherits.
     pub(super) fn hash_bits(&self, h: &mut impl std::hash::Hasher) {
         h.write_u8(self.off as u8);
         h.write_u8(self.shifted as u8);
-        for v in self.rigid.iter().chain(&self.contain) { h.write_u32(v.to_bits()); }
+        for v in self.rigid.iter().chain(&self.steady).chain(&self.contain) { h.write_u32(v.to_bits()); }
         h.write_u32(self.layer);
         match &self.parent {
             Some(p) => {

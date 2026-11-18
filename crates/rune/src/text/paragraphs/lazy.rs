@@ -10,6 +10,8 @@ use super::*;
 /// style's one line exactly and nothing moves when its layout lands.
 pub(crate) struct Lazy {
     pub(super) content: Rc<str>,
+    pub(super) spans: Rc<[Span]>,
+    pub(super) disjoint_spans: bool,
     pub(super) style: TextStyle,
     pub(super) scale: f32,
     pub(super) wrap_anywhere: bool,
@@ -26,10 +28,12 @@ pub(crate) struct Lazy {
 /// (device px), read from one shaped line, and an empty layout to stand in for a paragraph not
 /// shaped yet.
 pub(crate) struct AsciiLine {
-    pub(super) advance: [f32; 95],
+    pub(crate) advance: [f32; 95],
     /// The widest character's advance: a line this many times its length that fits needs no sum.
     pub(super) widest: f32,
-    pub(super) height: f32,
+    pub(crate) height: f32,
+    /// True when every printable ASCII character has the same advance (a fixed-pitch face).
+    pub(crate) fixed_pitch: bool,
     pub(super) empty: Rc<Layout<Ink>>,
 }
 
@@ -115,6 +119,31 @@ impl AsciiLine {
     }
 }
 impl TextSystem {
+    /// Find can ask for a range before the field paints. Resolve just the waiting lines
+    /// intersecting each mark, including marks that cross a packed run's boundary.
+    pub(crate) fn prepare_highlights(&mut self, laid: &mut Rc<ParagraphLayout>, marks: &[crate::TextHighlight]) {
+        for m in marks {
+            let Some(lazy) = &laid.lazy else { break };
+            let end = (m.end as usize).min(lazy.content.len());
+            let start = m.start as usize;
+            if start >= end { continue; }
+            let from = laid.paragraphs.partition_point(|p| p.end < start);
+            let mut waiting = laid.paragraphs[from..].iter().take_while(|p| p.start < end).filter(|p| !p.shaped);
+            let Some(first) = waiting.next() else { continue };
+            let last = waiting.last().unwrap_or(first);
+            let row = |p: &Paragraph, byte: usize| {
+                let at = byte.clamp(p.start, p.end);
+                let lines = lazy.content.as_bytes()[p.start..at].iter().filter(|&&b| b == b'\n').count();
+                p.y + (lines as f32 + 0.5) * lazy.ascii.height
+            };
+            let rows = (row(first, start), row(last, end - 1));
+            if let Some((filled, moved)) = self.fill_paragraphs(laid, std::time::Duration::MAX, rows, 0.0) {
+                *laid = filled;
+                if moved && let Some((exact, _)) = self.fill_paragraphs(laid, std::time::Duration::MAX, rows, f32::INFINITY) { *laid = exact; }
+            }
+        }
+    }
+
     /// Printable ASCII in `style` at `scale`, measured once: None when its characters don't all
     /// come from one font, whose one line is then not every ASCII line's.
     pub(super) fn ascii_line(&mut self, style: TextStyle, scale: f32, wrap_anywhere: bool) -> Option<Rc<AsciiLine>> {
@@ -138,7 +167,10 @@ impl TextSystem {
                 if r.len() != 1 || !(0x20..0x7f).contains(&b) { return None; }
                 advance[(b - 0x20) as usize] = cluster.advance();
             }
-            advance.iter().all(|a| a.is_finite()).then(|| Rc::new(AsciiLine { advance, widest: advance.iter().copied().fold(0.0, f32::max), height: l.height(), empty }))
+            advance.iter().all(|a| a.is_finite()).then(|| {
+                let (widest, narrowest) = (advance.iter().copied().fold(0.0, f32::max), advance.iter().copied().fold(f32::INFINITY, f32::min));
+                Rc::new(AsciiLine { advance, widest, height: l.height(), fixed_pitch: (widest - narrowest).abs() <= 1e-4, empty })
+            })
         })();
         self.ascii.insert(key, measured.clone());
         measured
@@ -151,7 +183,8 @@ impl TextSystem {
     /// line is shaped. None when none were waiting.
     pub(crate) fn fill_paragraphs(&mut self, laid: &ParagraphLayout, budget: std::time::Duration, rows: (f32, f32), reach: f32) -> Option<(Rc<ParagraphLayout>, bool)> {
         let lazy = laid.lazy.clone()?;
-        let start = std::time::Instant::now();
+        // The crate's clock: the standard library's has none in a browser, and panics there.
+        let start = crate::time::Instant::now();
         let distance = |p: &Paragraph| if p.y + p.height >= rows.0 && p.y <= rows.1 { 0.0 } else { (rows.0 - p.y - p.height).max(p.y - rows.1) };
         let mut paragraphs = laid.paragraphs.clone();
         let (mut moved, mut shaped_any) = (false, false);
@@ -174,26 +207,42 @@ impl TextSystem {
             }
             let p = &mut paragraphs[k];
             let words = &lazy.content[p.start..p.end];
-            let l = self.layout_keyed(Some(p.key), words, &[], &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base(), Inset::default());
+            let spans: Vec<Span> = spans_in(&lazy.spans, p.start, p.end, &[], lazy.disjoint_spans).collect();
+            let l = self.layout_keyed(Some(p.key), words, &spans, &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base(), Inset::default());
             moved |= l.height() != p.height;
             (p.height, p.widths, p.layout, p.shaped) = (l.height(), [l.width(), l.full_width()], l, true);
             shaped_any = true;
         }
         let (mut y, mut width, mut full_width) = (0.0f64, 0.0f32, 0.0f32);
         for p in &mut paragraphs {
-            p.y = y.round() as f32;
-            y += f64::from(p.height);
+            let want_frac = if p.shaped && p.layout.len() > 1 { (y - y.floor()) as f32 } else { 0.0 };
+            if p.shaped && (want_frac - p.y_frac).abs() > 1e-5 {
+                line_break::rebreak_at_y(Rc::make_mut(&mut p.layout), &[], Inset::default(), lazy.style.size, lazy.scale, laid.max_width, laid.align, f64::from(want_frac));
+                self.layout_ids.build(&p.layout);
+                (p.height, p.widths) = (p.layout.height(), [p.layout.width(), p.layout.full_width()]);
+            }
+            p.y = if want_frac != 0.0 { y.floor() as f32 } else { y.round() as f32 };
+            p.y_frac = want_frac;
+            if p.shaped {
+                y += f64::from(p.height);
+            } else {
+                for _ in 0..p.lines { y += f64::from(lazy.ascii.height); }
+            }
             (width, full_width) = (width.max(p.widths[0]), full_width.max(p.widths[1]));
         }
         let left = paragraphs.iter().any(|p| !p.shaped);
         let keyed = laid.keyed.as_ref().map(|k| Keyed { content: k.content.clone(), style_key: k.style_key, start_flow: k.start_flow });
         let built = Rc::new(ParagraphLayout {
             paragraphs, width, full_width, height: y as f32, max_width: laid.max_width, align: laid.align, whole: laid.whole,
-            newline: laid.newline, keyed, lazy: left.then_some(lazy.clone()),
+            newline: laid.newline, blank_box: laid.blank_box, disjoint_spans: laid.disjoint_spans, keyed, lazy: left.then_some(lazy.clone()),
         });
         let g = self.generation;
-        self.paragraphs.insert(lazy.cache_key, Entry::new(built.clone(), g, built.paragraphs.len() * size_of::<Paragraph>() / 64, built.whole));
-        if self.last_paragraphs.as_ref().is_some_and(|l| std::ptr::eq(&**l, laid)) { self.last_paragraphs = Some(built.clone()); }        Some((built, moved))
+        let shaped_bytes: usize = built.paragraphs.iter().filter(|p| p.shaped).map(|p| p.end - p.start).sum();
+        let shaped_n = built.paragraphs.iter().filter(|p| p.shaped).count();
+        let cost = shaped_bytes + shaped_n.saturating_sub(1) * 32 + built.paragraphs.len() * size_of::<Paragraph>() / 64;
+        self.paragraphs.insert(lazy.cache_key, Entry::new(built.clone(), g, cost, built.whole));
+        if self.last_paragraphs.as_ref().is_some_and(|l| std::ptr::eq(&**l, laid)) { self.last_paragraphs = Some(built.clone()); }
+        Some((built, moved))
     }
 }
 
@@ -219,9 +268,11 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
     // The run gathered before `a` or after `b`: its first byte, its lines and its widest line's width.
     let mut run: Option<(usize, u32, f32)> = None;
     let mut at = r.start;
-    for (j, words) in lazy.content[r.start..r.end].split('\n').enumerate() {
+    for (j, raw) in lazy.content[r.start..r.end].split('\n').enumerate() {
+        let raw_len = raw.len();
+        let words = if at + raw_len < r.end { raw.strip_suffix('\r').unwrap_or(raw) } else { raw };
         let (s, e) = (at, at + words.len());
-        at = e + 1;
+        at += raw_len + 1;
         // Printable ASCII, as every line of a run is: its letters are its strong characters.
         flow = lazy.forced.or_else(|| words.bytes().any(|c| c.is_ascii_alphabetic()).then_some(Flow::Ltr)).unwrap_or(flow);
         if j < a || j >= b {
@@ -233,16 +284,24 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
                 run = None;
                 let mut hs = hash::KeyHasher::default();
                 (&lazy.content[start..e], lazy.style_key, flow == Flow::Rtl, lines, "run").hash(&mut hs);
+                let run_spans: Vec<Span> = spans_in(&lazy.spans, start, e, &[], lazy.disjoint_spans).collect();
+                for sp in span::layout_spans(&run_spans) {
+                    sp.hash_layout(&mut hs);
+                }
                 let height = (f64::from(lines) * f64::from(h)) as f32;
-                out.push(Paragraph { start, end: e, y: y.round() as f32, height, widths: [widest, widest], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
+                out.push(Paragraph { start, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [widest, widest], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
                 y += f64::from(height);
             }
             continue;
         }
         let mut hs = hash::KeyHasher::default();
         (words, lazy.style_key, flow == Flow::Rtl, Block::Paragraph).hash(&mut hs);
+        let line_spans: Vec<Span> = spans_in(&lazy.spans, s, e, &[], lazy.disjoint_spans).collect();
+        for sp in span::layout_spans(&line_spans) {
+            sp.hash_layout(&mut hs);
+        }
         let (height, w) = lazy.ascii.one_line(words, max_width, 0.0, true).unwrap_or((h, 0.0));
-        out.push(Paragraph { start: s, end: e, y: y.round() as f32, height, widths: [w, w], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
+        out.push(Paragraph { start: s, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [w, w], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
         y += f64::from(height);
     }
     out

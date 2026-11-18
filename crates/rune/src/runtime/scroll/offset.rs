@@ -45,16 +45,16 @@ impl<S: 'static> Runtime<S> {
             if glide.is_some() { st.spring = glide; }
             if let Some(x) = r.x.filter(|_| axes.x()) {
                 let to = f64::from(x).max(0.0);
-                st.x.stop();
+                // A glide that starts during a wheel's ease keeps the ease's speed.
+                let v = match st.x.motion { XMotion::Glide { v, .. } => v, XMotion::Wheel(c) => c.velocity() as f32, _ => 0.0 };
                 if let Some(spring) = glide && (to.min(st.x.max) - st.x.offset).abs() > 0.5 {
                     // A long trip cuts to a couple of viewports out first, as a glide to the bottom does.
                     let reach = scroll_bottom::GLIDE_REACH * view_w;
                     let end = to.min(st.x.max);
                     st.x.offset = st.x.offset.clamp(end - reach, end + reach);
-                    st.x.aim = to;
-                    st.x.glide = Some(retarget_v(spring, st.x.offset, st.x.glide.unwrap_or(0.0), end));
+                    st.x.motion = XMotion::Glide { v: retarget_v(spring, st.x.offset, v, end), aim: to };
                 } else {
-                    st.x.glide = None;
+                    st.x.motion = XMotion::Rest;
                     jumps.push((id, true, to));
                 }
             }
@@ -64,7 +64,7 @@ impl<S: 'static> Runtime<S> {
                     let reach = scroll_bottom::GLIDE_REACH * view_h;
                     let end = to.min(st.max);
                     st.offset = st.offset.clamp(end - reach, end + reach);
-                    let v = retarget_v(spring, st.offset, st.glide().unwrap_or(0.0), end);
+                    let v = retarget_v(spring, st.offset, st.glide().or_else(|| st.mode.wheel().map(|c| c.velocity() as f32)).unwrap_or(0.0), end);
                     st.mode = st.mode.to_glide(v, GlideTo::Offset(to));
                 } else {
                     st.halt();
@@ -114,19 +114,25 @@ impl<S: 'static> Runtime<S> {
     /// A virtual row not mounted yet stands where its list's estimates put it: the jump there
     /// mounts it, and is placed again from its laid-out top once it has (`scroll_to_offsets`).
     fn anchor_offset(&self, key: &str, at: f32) -> Option<(usize, f64)> {
-        let top = self.nodes.iter().enumerate()
-            .find_map(|(i, n)| (n.named(key) && !self.subtree_exiting(i)).then_some(n.target[1]))
-            .or_else(|| {
-                let (i, [_, y0, _, _]) = self.highlight_target_in(&self.nodes, None, key)?;
-                (!self.subtree_exiting(i)).then_some(y0)
-            });
-        if let Some(top) = top {
-            let v = self.scroll_viewport_on(key, false, true)?;
+        let found = |scope: Option<&str>, key: &str| {
+            self.nodes.iter().enumerate()
+                .find_map(|(i, n)| (n.named(key) && n.parent.is_none_or(|p| in_scope(&self.nodes[p].path, scope)) && !self.subtree_exiting(i)).then_some((i, n.target[1])))
+                .or_else(|| {
+                    let (i, [_, y0, _, _]) = self.highlight_target_in(&self.nodes, scope, key)?;
+                    (!self.subtree_exiting(i)).then_some((i, y0))
+                })
+        };
+        // `"row/mark"`: element or highlight `mark` anywhere inside the element keyed `row`.
+        let top = found(None, key).or_else(|| key.split_once('/').and_then(|(row, mark)| found(Some(row), mark)));
+        if let Some((i, top)) = top {
+            let v = std::iter::successors(Some(i), |&p| self.nodes[p].parent).find(|&p| self.nodes[p].scroll.is_some() && self.nodes[p].scroll_axes.y())?;
             return Some((v, f64::from(top - self.nodes[v].target[1] - at).max(0.0)));
         }
         self.nodes.iter().find_map(|n| {
             let list = self.virtuals.get(&n.path)?;
-            let index = list.index_of(key)?;
+            // A row that isn't mounted stands where the estimates put it; the jump mounts it and
+            // `scroll_to_offsets` places `mark` once it has.
+            let index = list.index_of(key).or_else(|| list.index_of(key.split_once('/')?.0))?;
             let v = *self.node_index.get(self.path_ids.get(&list.scroll_path)?)?;
             Some((v, f64::from(list.top + list.pad_top + list.prefix(index) - at).max(0.0)))
         })
@@ -218,7 +224,7 @@ impl ScrollState {
     /// A hand, its momentum or a glide is moving the content this frame: what
     /// [`ElementInfo::scrolling`](crate::ElementInfo) reports for everything inside.
     pub(crate) fn moving(&self) -> bool {
-        self.scrolling() || self.glide().is_some() || self.x.glide.is_some()
+        self.scrolling() || self.glide().is_some() || self.mode.wheel().is_some() || self.x.carried()
     }
 
     /// It follows its content's bottom.
@@ -268,6 +274,11 @@ impl ScrollState {
 
     /// A hand or an app put the offset where it is: momentum and any glide stop, and a
     /// stick-to-bottom viewport (`stick`) follows its end only if it sits there.
+    /// An app's keep moved the offset (rows above measured, an anchor held what's on screen): a
+    /// wheel's ease goes on, moved with it on its next step (`WheelCurve::follow`), as Chromium's
+    /// `ApplyAdjustment` moves a running smooth scroll; anything else lands as `Self::land` does.
+    pub(super) fn keep_land(&mut self, stick: bool) { if self.mode.wheel().is_none() { self.land(stick) } }
+
     pub(super) fn land(&mut self, stick: bool) {
         if stick && self.offset >= self.max - 0.5 { self.pin() } else { let _ = mode::step(&mut self.mode, mode::Event::Rest); }
     }

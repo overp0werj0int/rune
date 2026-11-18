@@ -188,7 +188,7 @@ impl<S: 'static> Runtime<S> {
         let flung = self.throw.flung?;
         let st = self.scrolls.get(&flung.id)?;
         if flung.horizontal {
-            st.x.fling.map(|f| (st.x.toward(f.velocity()), 0.0))
+            match st.x.motion { XMotion::Fling(f) => Some((st.x.toward(f.velocity()), 0.0)), _ => None }
         } else {
             match st.mode {
                 ScrollMode::Fling { fling, .. } => Some((0.0, -fling.velocity())),
@@ -207,7 +207,7 @@ impl<S: 'static> Runtime<S> {
         };
         let Some(flung) = self.throw.flung.take() else { return };
         if let Some(st) = self.scrolls.get_mut(&flung.id) {
-            if flung.horizontal { st.x.fling = None } else { st.halt() }
+            if flung.horizontal { st.x.motion = XMotion::Rest } else { st.halt() }
         }
         self.throw.boost = self.throw.boost.stopped(t, now);
         log_event!(self, "fling stopped");
@@ -248,11 +248,12 @@ impl<S: 'static> Runtime<S> {
     }
 
     /// Gesture `gesture`'s release reached scrolling, untaken by any `on_wheel` handler: its
-    /// fling starts on the viewport the gesture scrolled, at (x, y) when vertical.
-    pub(super) fn throw_released(&mut self, gesture: Attempt, x: f32, y: f32) {
+    /// fling starts on the viewport the gesture scrolled, the one its run of vertical deltas
+    /// kept to when vertical (`WheelLock::vertical_run`), as Chromium flings the latched scroller.
+    pub(super) fn throw_released(&mut self, gesture: Attempt) {
         let Some(release) = self.throw.release.take_if(|r| r.gesture == gesture) else { return };
         let target = match self.wheel_lock.owner_of(gesture) {
-            Some(WheelOwner::Vertical) => self.scroll_at(x, y).map(|id| Flung { id, horizontal: false }),
+            Some(WheelOwner::Vertical) => self.wheel_lock.vertical_viewport().map(|id| Flung { id, horizontal: false }),
             Some(WheelOwner::Horizontal(id)) => Some(Flung { id: *id, horizontal: true }),
             _ => None,
         };
@@ -269,9 +270,7 @@ impl<S: 'static> Runtime<S> {
             return;
         };
         if flung.horizontal {
-            st.x.stop();
-            st.x.glide = None;
-            st.x.fling = Some(fling);
+            st.x.motion = XMotion::Fling(fling);
         } else {
             st.mode = st.mode.to_fling(fling);
         }

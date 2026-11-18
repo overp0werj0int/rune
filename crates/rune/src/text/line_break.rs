@@ -5,10 +5,22 @@ use super::*;
 /// Breaks a shaped `layout` at `max_width` again and aligns its lines, as
 /// [`TextSystem::layout_keyed`] breaks the layouts it shapes.
 pub(super) fn rebreak(layout: &mut Layout<Ink>, blocks: &[crate::edit::Block], inset: Inset, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment) {
+    rebreak_at_y(layout, blocks, inset, font_size, scale, max_width, align, 0.0);
+}
+
+/// [`rebreak`] starting at fractional vertical pixel phase `y_frac` (`y - y.floor()`), so a
+/// wrapped paragraph in a [`ParagraphLayout`](super::ParagraphLayout) quantizes each sub-line's
+/// `y` identically to [`Layout`](parley::Layout)'s accumulated `line_y`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn rebreak_at_y(layout: &mut Layout<Ink>, blocks: &[crate::edit::Block], inset: Inset, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment, y_frac: f64) {
     if blocks.iter().any(|&b| b != crate::edit::Block::Paragraph) || layout.inline_boxes().next().is_some() || !inset.is_flush() {
-        break_lines_with_blocks(layout, blocks, inset, font_size, scale, max_width, Vec::new());
-    } else {
+        break_lines_with_blocks_at(layout, blocks, inset, font_size, scale, max_width, Vec::new(), y_frac);
+    } else if y_frac == 0.0 {
         layout.break_all_lines(max_width);
+    } else {
+        let mut breaker = layout.break_lines();
+        breaker.state_mut().set_line_y(y_frac);
+        breaker.break_remaining(max_width.unwrap_or(f32::MAX));
     }
     layout.align(align, parley::AlignmentOptions::default());
 }
@@ -35,7 +47,7 @@ pub(super) fn break_new(layout: &mut Layout<Ink>, text: &str, blocks: &[crate::e
     if let (true, Some(width)) = (pretty, max_width) {
         let caps = super::pretty::caps(layout, text, font_size, scale, width);
         if !caps.is_empty() {
-            break_lines_capped(layout, &[], Starts::default(), font_size, scale, max_width, &caps, &mut Vec::new());
+            break_lines_capped(layout, &[], Starts::default(), font_size, scale, max_width, &caps, &mut Vec::new(), 0.0);
         }
     }
 }
@@ -53,18 +65,33 @@ pub(super) fn break_lines_with_blocks(
     max_width: Option<f32>,
     caps: Vec<((usize, usize), f32)>,
 ) {
+    break_lines_with_blocks_at(layout, blocks, inset, font_size, scale, max_width, caps, 0.0);
+}
+
+/// [`break_lines_with_blocks`] starting at vertical pixel phase `y_frac` (see [`rebreak_at_y`]).
+#[allow(clippy::too_many_arguments)]
+fn break_lines_with_blocks_at(
+    layout: &mut Layout<Ink>,
+    blocks: &[crate::edit::Block],
+    inset: Inset,
+    font_size: f32,
+    scale: f32,
+    max_width: Option<f32>,
+    caps: Vec<((usize, usize), f32)>,
+    y_frac: f64,
+) {
     let mut starts = Starts { first: inset.indent + inset.first, rest: inset.indent };
     if inset.hang > 0 {
         // The hung bytes' width is theirs once they're on a line: break with them in the
         // text's column, measure them there, and break again with them before it. The lead
         // stays in the column and moves the other lines in by its width.
-        break_lines_at(layout, blocks, Starts { first: inset.indent, rest: inset.indent }, font_size, scale, max_width, caps.clone());
+        break_lines_at(layout, blocks, Starts { first: inset.indent, rest: inset.indent }, font_size, scale, max_width, caps.clone(), y_frac);
         let lead = advance(layout, 0, inset.lead);
         starts.first -= advance(layout, inset.lead, inset.hang);
         starts.rest += lead;
     }
     starts.first = starts.first.max(0.0);
-    break_lines_at(layout, blocks, starts, font_size, scale, max_width, caps);
+    break_lines_at(layout, blocks, starts, font_size, scale, max_width, caps, y_frac);
 }
 
 /// Where a paragraph's first line and its other lines start, in device px from its start edge,
@@ -83,6 +110,7 @@ fn advance(layout: &Layout<Ink>, from: usize, to: usize) -> f32 {
 
 /// Breaks `layout` into lines, each paragraph indented by its block and `starts`. A pill's chip
 /// that would end a line apart from its label, or run past the line's end, moves to the next line.
+#[allow(clippy::too_many_arguments)]
 fn break_lines_at(
     layout: &mut Layout<Ink>,
     blocks: &[crate::edit::Block],
@@ -91,6 +119,7 @@ fn break_lines_at(
     scale: f32,
     max_width: Option<f32>,
     mut caps: Vec<((usize, usize), f32)>,
+    y_frac: f64,
 ) {
     let pills = layout.inline_boxes().filter(|b| b.id & PILL_BOX != 0).count() / 2;
     // `(para_idx, line_in_para)` and the room it gets instead: less to break before a chip, or
@@ -98,7 +127,7 @@ fn break_lines_at(
     // can adjust the first misplaced pill in every paragraph at once.
     let mut lines_meta = Vec::new();
     for _ in 0..=2 * pills {
-        break_lines_capped(layout, blocks, starts, font_size, scale, max_width, &caps, &mut lines_meta);
+        break_lines_capped(layout, blocks, starts, font_size, scale, max_width, &caps, &mut lines_meta, y_frac);
         if max_width.is_none() || pills == 0 || !collect_misplaced_pills(layout, &lines_meta, &mut caps) {
             return;
         }
@@ -107,6 +136,7 @@ fn break_lines_at(
 
 /// [`break_lines_with_blocks`] once, with `caps` setting the room on given `(para_idx, line_in_para)`
 /// lines (the last for a line wins). Fills `out` with `((para_idx, line_in_para), uncapped_room)`.
+#[allow(clippy::too_many_arguments)]
 fn break_lines_capped(
     layout: &mut Layout<Ink>,
     blocks: &[crate::edit::Block],
@@ -116,11 +146,15 @@ fn break_lines_capped(
     max_width: Option<f32>,
     caps: &[((usize, usize), f32)],
     out: &mut Vec<((usize, usize), f32)>,
+    y_frac: f64,
 ) {
     out.clear();
     let layout_max = max_width.unwrap_or(f32::MAX);
     let rtl = layout.is_rtl();
     let mut breaker = layout.break_lines();
+    if y_frac != 0.0 {
+        breaker.state_mut().set_line_y(y_frac);
+    }
     breaker.state_mut().set_layout_max_advance(layout_max);
     let (mut para_idx, mut line_in_para) = (0usize, 0usize);
     while !breaker.is_done() {
