@@ -168,7 +168,7 @@ fn an_ime_preedit_beside_a_hung_mark_keeps_the_hang() {
     // After the mark: the preedit is the item's text, starting at the indent.
     let mut rt = field("- item", 2);
     let mark_x = at(&rt, 0)[0];
-    rt.ime(Ime::Preedit("にほん".into(), None));
+    rt.ime(Ime::Preedit("にほん".into(), None, Vec::new()));
     rt.frame(1.0 / 120.0);
     assert_eq!(rt.state.text, "- item");
     assert!(near(at(&rt, 0)[0], mark_x), "the mark stays where it hung");
@@ -183,7 +183,7 @@ fn an_ime_preedit_beside_a_hung_mark_keeps_the_hang() {
 
     // Inside the mark: the preedit hangs with it, and the item's text stays on the indent.
     let mut rt = field("- item", 1);
-    rt.ime(Ime::Preedit("あ".into(), None));
+    rt.ime(Ime::Preedit("あ".into(), None, Vec::new()));
     rt.frame(1.0 / 120.0);
     let text = 2 + "あ".len();
     assert!(near(at(&rt, text)[0], GUTTER), "the text after the mark and its preedit starts at the indent, not {}", at(&rt, text)[0]);
