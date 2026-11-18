@@ -202,20 +202,6 @@ impl<'a> Piece<'a> {
         }).collect())
     }
 
-    /// `highlights` over its words, cut to them and on its shaped text.
-    pub(crate) fn highlights<'s>(&self, highlights: &'s [crate::text::TextHighlight]) -> Cow<'s, [crate::text::TextHighlight]> {
-        if self.whole { return Cow::Borrowed(highlights); }
-        Cow::Owned(highlights.iter().filter_map(|h| {
-            let (a, b) = self.clip(h.start as usize, h.end as usize)?;
-            Some(crate::text::TextHighlight { start: a as u32, end: b as u32, ..h.clone() })
-        }).collect())
-    }
-
-    /// Its shaped text's length: a whole layout's runs to `len`, the text's.
-    pub(crate) fn shaped_len(&self, len: usize) -> usize {
-        if self.whole { len } else { self.shaped(self.end) }
-    }
-
     /// Content bytes `a..b` on its shaped text, when they meet its words.
     pub(crate) fn clip(&self, a: usize, b: usize) -> Option<(usize, usize)> {
         if self.whole { return (a < b).then_some((a, b)); }
