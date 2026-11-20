@@ -381,4 +381,40 @@ mod tests {
             assert!(low <= bottom + 0.5, "up {step}: caret bottom {low} inside {bottom}");
         }
     }
+
+    #[test]
+    fn on_input_key_edit_scrolls_caret_into_view() {
+        let mut edit = TextEdit::new((0..30).map(|l| format!("line {l}")).collect::<Vec<_>>().join("\n"));
+        edit.focused = true;
+        let mut rt = Runtime::new(edit, |e: &TextEdit, _: &mut Cx<TextEdit>| {
+            col().w_full().h_full().child(
+                col().key("viewport").w_full().h(160.0).scroll(ScrollSpec { stick_bottom: false })
+                    .child(
+                        text_input(e, TextStyle::new(13.0, 400.0).lh(20.0))
+                            .key("field")
+                            .w_full()
+                            .on_edit(|s: &mut TextEdit| s)
+                            .on_input_key(|s: &mut TextEdit, ev: &KeyEvent, _| {
+                                if ev.key == Key::Enter {
+                                    s.insert("\n");
+                                    return true;
+                                }
+                                false
+                            }),
+                    ),
+            )
+        }, (300.0, 400.0), Env::new(true, 2.0));
+        rt.frame(0.0);
+        for step in 0..4 {
+            rt.key(KeyEvent { key: Key::Enter, mods: Mods::default() });
+            rt.frame(1.0 / 120.0);
+            let els = rt.elements();
+            let viewport = els.iter().find(|e| e.key.as_deref() == Some("viewport")).unwrap().rect;
+            let caret = els.iter().find(|e| e.key.as_deref() == Some("field")).unwrap().caret.unwrap();
+            assert!(
+                caret[1] >= viewport[1] - 0.5 && caret[1] + caret[3] <= viewport[1] + viewport[3] + 0.5,
+                "enter {step}: caret {caret:?} outside viewport {viewport:?}"
+            );
+        }
+    }
 }

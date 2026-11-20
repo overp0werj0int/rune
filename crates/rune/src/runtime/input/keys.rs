@@ -29,10 +29,22 @@ impl<S: 'static> Runtime<S> {
         if self.focused_input().is_some() {
             self.input_click.clear_last();
         }
-        if let Some(f) = self.focused_input().and_then(|input| input.key.clone())
-            && Tx::took(f(states!(self), ev, one), one)
-        {
-            return true;
+        if let Some(f) = self.focused_input().and_then(|input| input.key.clone()) {
+            let before = self.focused_input().and_then(|input| input.access.clone()).map(|access| {
+                let edit = access(states!(self));
+                (edit.anchor, edit.focus, edit.text.len())
+            });
+            if Tx::took(f(states!(self), ev, one), one) {
+                if let Some((a, b, len)) = before
+                    && let Some(access) = self.focused_input().and_then(|input| input.access.clone())
+                {
+                    let edit = access(states!(self));
+                    if edit.anchor != a || edit.focus != b || edit.text.len() != len {
+                        self.caret_follow = true;
+                    }
+                }
+                return true;
+            }
         }
         one.physical_key = None;
         // Inside a list item or code block, Tab (and Shift+Tab in lists) edits the document by default.

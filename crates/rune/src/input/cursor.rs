@@ -70,12 +70,11 @@ pub struct CursorImage {
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const CELL: CursorImage = CursorImage { bytes: include_bytes!("cursor/cell.png"), hot: [7.0, 7.0], crisp: true };
 
-/// The pan cursor a middle-click autoscroll shows (`runtime/input/autoscroll.rs`): Chromium's
-/// Windows `pan_*` cursors, each pixel of their 32 px bitmaps doubled, which Blink picks the way
-/// this does: while it scrolls, an arrow the way it goes; at rest, a mark of the axes
+/// The pan cursor a middle-click autoscroll shows (`runtime/input/autoscroll.rs`): Phosphor-style
+/// 2x PNG pan cursors. While it scrolls, an arrow the way it goes; at rest, a mark of the axes
 /// (horizontal, vertical) it can scroll on.
 pub(crate) fn pan(axes: (bool, bool), velocity: (f32, f32)) -> CursorImage {
-    let pan = |bytes: &'static [u8]| CursorImage { bytes, hot: [16.0, 16.0], crisp: true };
+    let pan = |bytes: &'static [u8]| CursorImage { bytes, hot: [16.0, 16.0], crisp: false };
     let (east, west, south, north) = (velocity.0 > 0.0, velocity.0 < 0.0, velocity.1 > 0.0, velocity.1 < 0.0);
     match (north, south, east, west) {
         (true, _, true, _) => pan(include_bytes!("cursor/pan_north_east.png")),
