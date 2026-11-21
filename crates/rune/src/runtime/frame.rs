@@ -715,7 +715,13 @@ impl<S: 'static> Runtime<S> {
         }
         #[cfg(debug_assertions)]
         self.watch_frame(commits0, tx.scroll_offsets.iter().find(|r| tx.commit.snaps() || r.glide.is_none()).map(|r| r.key.as_str()));
-        let follow = std::mem::take(&mut self.caret_follow);
+        let mut follow = std::mem::take(&mut self.caret_follow);
+        if let Some((path, a, b, len)) = self.caret_edit_check.take()
+            && self.focus.path() == Some(path.as_str())
+            && self.focused_input().is_some_and(|i| i.edit.anchor != a || i.edit.focus != b || i.edit.text.len() != len)
+        {
+            follow = true;
+        }
         self.finish_scroll_requests(&mut tx, follow);
         // Those scrolls moved the caret after the commit a view placed from it saw.
         if self.caret_watch && self.caret_moved(None) { self.commit(&Tx { commit: Commit::Instant, ..Tx::default() }); }

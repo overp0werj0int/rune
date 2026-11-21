@@ -756,6 +756,10 @@ pub struct Runtime<S: 'static> {
     feedback: layout_read::Feedback,
     /// An edit ran this frame: keep the caret in its scroll viewport after the commit.
     caret_follow: bool,
+    /// Snapshot `(path, anchor, focus, text_len)` taken before an `on_input_key` handler ran;
+    /// checked read-only against the committed node so edits scroll the caret without calling
+    /// `input.access` (which may lazily recreate dismissed fields).
+    caret_edit_check: Option<(String, usize, usize, usize)>,
     links: links::LinkState,
     /// The selection in `El::selectable` text.
     selectable: selectable::phase::TextSel,
@@ -1098,6 +1102,7 @@ impl<S: 'static> Runtime<S> {
             window_pixels: None,
             feedback: Default::default(),
             caret_follow: false,
+            caret_edit_check: None,
             links: Default::default(),
             selectable: Default::default(),
             sel_snapshot: Default::default(),
