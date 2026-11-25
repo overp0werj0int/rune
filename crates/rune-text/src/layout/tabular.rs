@@ -607,6 +607,7 @@ impl TextSystem {
             false,
             Keep::Owned,
             parley::BaseDirection::Auto,
+            crate::paragraph_style::Inset::default(),
         )
     }
 

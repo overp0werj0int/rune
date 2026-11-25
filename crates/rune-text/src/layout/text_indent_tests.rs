@@ -16,6 +16,7 @@ fn spec<'a>(content: &'a str, text_indent: f32, dir: TextDir, pretty: bool, by_p
         content,
         spans: &[],
         blocks: &[],
+        paragraph_styles: &[],
         pills: &[],
         span_boxes: &[],
         inline_boxes: &[],

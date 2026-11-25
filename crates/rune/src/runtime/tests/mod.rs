@@ -30,6 +30,7 @@ mod no_motion;
 mod on_any_press;
 mod on_button;
 mod one_snap;
+mod paragraph_styles;
 mod picture_scale;
 mod pointer_drag;
 mod pointer_hit;

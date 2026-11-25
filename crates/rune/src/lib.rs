@@ -415,6 +415,7 @@ pub use text::InlineAlign;
 pub use text::InlineBox;
 pub use text::Link;
 pub use text::LinkPaint;
+pub use text::ParagraphStyle;
 pub use text::SmoothingSupport;
 pub use text::Span;
 pub use text::SpanBox;

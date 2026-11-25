@@ -551,6 +551,7 @@ fn text_flow_line_span_covers_single_wrapped_multiline_and_blank_lines() {
         content: doc,
         spans: &[],
         blocks: &[],
+        paragraph_styles: &[],
         pills: &[],
         span_boxes: &[],
         inline_boxes: &[],

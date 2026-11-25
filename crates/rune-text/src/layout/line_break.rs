@@ -15,19 +15,19 @@ pub(crate) fn indent_px(text_indent: f32, scale: f32) -> f32 {
 /// Breaks a shaped `layout` at `max_width` again and aligns its lines, as
 /// [`TextSystem::layout_keyed`] breaks the layouts it shapes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn rebreak(layout: &mut Layout<Ink>, blocks: &[crate::Block], text_indent: f32, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment) {
-    rebreak_at_y(layout, blocks, text_indent, font_size, scale, max_width, align, 0.0);
+pub(crate) fn rebreak(layout: &mut Layout<Ink>, blocks: &[crate::Block], text_indent: f32, inset: Inset, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment) {
+    rebreak_at_y(layout, blocks, text_indent, inset, font_size, scale, max_width, align, 0.0);
 }
 
 /// [`rebreak`] starting at fractional vertical pixel phase `y_frac` (`y - y.floor()`), so a
 /// wrapped paragraph in a [`ParagraphLayout`](super::ParagraphLayout) quantizes each sub-line's
 /// `y` identically to [`Layout`](parley::Layout)'s accumulated `line_y`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn rebreak_at_y(layout: &mut Layout<Ink>, blocks: &[crate::Block], text_indent: f32, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment, y_frac: f64) {
+pub(crate) fn rebreak_at_y(layout: &mut Layout<Ink>, blocks: &[crate::Block], text_indent: f32, inset: Inset, font_size: f32, scale: f32, max_width: Option<f32>, align: Alignment, y_frac: f64) {
     let indent = indent_px(text_indent, scale);
     layout.set_text_indent(indent, parley::IndentOptions::default());
-    if blocks.iter().any(|&b| b != crate::Block::Paragraph) || layout.inline_boxes().next().is_some() {
-        break_lines_with_blocks_at(layout, blocks, indent, font_size, scale, max_width, Vec::new(), y_frac);
+    if blocks.iter().any(|&b| b != crate::Block::Paragraph) || layout.inline_boxes().next().is_some() || !inset.is_flush() {
+        break_lines_with_blocks_at(layout, blocks, indent, inset, font_size, scale, max_width, Vec::new(), y_frac);
     } else if y_frac == 0.0 {
         layout.break_all_lines(max_width);
     } else {
@@ -38,21 +38,22 @@ pub(crate) fn rebreak_at_y(layout: &mut Layout<Ink>, blocks: &[crate::Block], te
     layout.align(align, parley::AlignmentOptions::default());
 }
 
-/// Breaks a layout [`TextSystem::layout_keyed`] shaped from `text`: by blocks and pills when
-/// `indented` (it has either), else at `max_width`; then, when `pretty`, a plain one's paragraphs
-/// that end on a lone short word again, as [`super::pretty`] scores them.
+/// Breaks a layout [`TextSystem::layout_keyed`] shaped from `text`: by blocks, pills and
+/// `inset` when `indented` (it has blocks or pills) or `inset` isn't flush, else at `max_width`;
+/// then, when `pretty`, a plain one's paragraphs that end on a lone short word again, as
+/// [`super::pretty`] scores them.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn break_new(layout: &mut Layout<Ink>, text: &str, blocks: &[crate::Block], text_indent: f32, indented: bool, font_size: f32, scale: f32, max_width: Option<f32>, pretty: bool) {
+pub(crate) fn break_new(layout: &mut Layout<Ink>, text: &str, blocks: &[crate::Block], text_indent: f32, inset: Inset, indented: bool, font_size: f32, scale: f32, max_width: Option<f32>, pretty: bool) {
     let indent = indent_px(text_indent, scale);
     layout.set_text_indent(indent, parley::IndentOptions::default());
-    if indented {
-        break_lines_with_blocks(layout, blocks, indent, font_size, scale, max_width, Vec::new());
+    if indented || !inset.is_flush() {
+        break_lines_with_blocks(layout, blocks, indent, inset, font_size, scale, max_width, Vec::new());
         // Pills (a link's icon, a mention's chip) wrap prettily too, as their inline boxes do in
-        // Chromium; indented blocks (lists, quotes, code) keep the greedy lines.
-        if let (true, Some(width)) = (pretty && blocks.iter().all(|&b| b == crate::Block::Paragraph), max_width) {
+        // Chromium; indented blocks (lists, quotes, code) and paragraph insets keep the greedy lines.
+        if let (true, Some(width)) = (pretty && inset.is_flush() && blocks.iter().all(|&b| b == crate::Block::Paragraph), max_width) {
             let caps = super::pretty::caps(layout, text, font_size, scale, width);
             if !caps.is_empty() {
-                break_lines_with_blocks(layout, blocks, indent, font_size, scale, max_width, caps);
+                break_lines_with_blocks(layout, blocks, indent, inset, font_size, scale, max_width, caps);
             }
         }
         return;
@@ -61,25 +62,27 @@ pub(crate) fn break_new(layout: &mut Layout<Ink>, text: &str, blocks: &[crate::B
     if let (true, Some(width)) = (pretty, max_width) {
         let caps = super::pretty::caps(layout, text, font_size, scale, width);
         if !caps.is_empty() {
-            break_lines_capped(layout, &[], indent, font_size, scale, max_width, &caps, &mut Vec::new(), 0.0);
+            break_lines_capped(layout, &[], indent, Starts::default(), font_size, scale, max_width, &caps, &mut Vec::new(), 0.0);
         }
     }
 }
 
-/// Breaks `layout` into lines, each paragraph indented by its block. A pill's chip that would
-/// end a line apart from its label, or run past the line's end, moves to the next line. `caps`
-/// start as the room given lines (pretty wrapping's); a pill's adjustments come after them.
+/// Breaks `layout` into lines, each paragraph indented by its block and by `inset`, whose hung
+/// bytes start its first line their own width early. A pill's chip that would end a line apart
+/// from its label, or run past the line's end, moves to the next line. `caps` start as the room
+/// given lines (pretty wrapping's); a pill's adjustments come after them.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn break_lines_with_blocks(
     layout: &mut Layout<Ink>,
     blocks: &[crate::Block],
     first_indent: f32,
+    inset: Inset,
     font_size: f32,
     scale: f32,
     max_width: Option<f32>,
     caps: Vec<((usize, usize), f32)>,
 ) {
-    break_lines_with_blocks_at(layout, blocks, first_indent, font_size, scale, max_width, caps, 0.0);
+    break_lines_with_blocks_at(layout, blocks, first_indent, inset, font_size, scale, max_width, caps, 0.0);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -87,6 +90,49 @@ fn break_lines_with_blocks_at(
     layout: &mut Layout<Ink>,
     blocks: &[crate::Block],
     first_indent: f32,
+    inset: Inset,
+    font_size: f32,
+    scale: f32,
+    max_width: Option<f32>,
+    caps: Vec<((usize, usize), f32)>,
+    y_frac: f64,
+) {
+    let mut starts = Starts { first: inset.indent + inset.first, rest: inset.indent };
+    if inset.hang > 0 {
+        // The hung bytes' width is theirs once they're on a line: break with them in the
+        // text's column, measure them there, and break again with them before it. The lead
+        // stays in the column and moves the other lines in by its width.
+        break_lines_at(layout, blocks, first_indent, Starts { first: inset.indent, rest: inset.indent }, font_size, scale, max_width, caps.clone(), y_frac);
+        let lead = advance(layout, 0, inset.lead);
+        starts.first -= advance(layout, inset.lead, inset.hang);
+        starts.rest += lead;
+    }
+    starts.first = starts.first.max(0.0);
+    break_lines_at(layout, blocks, first_indent, starts, font_size, scale, max_width, caps, y_frac);
+}
+
+/// Where a paragraph's first line and its other lines start, in device px from its start edge,
+/// on top of its block's indent.
+#[derive(Clone, Copy, Default)]
+struct Starts {
+    first: f32,
+    rest: f32,
+}
+
+/// The advance of the first line's clusters within bytes `from..to`.
+fn advance(layout: &Layout<Ink>, from: usize, to: usize) -> f32 {
+    let Some(line) = layout.get(0) else { return 0.0 };
+    line.runs().flat_map(|run| run.clusters()).filter(|c| from <= c.text_range().start && c.text_range().end <= to).map(|c| c.advance()).sum()
+}
+
+/// Breaks `layout` into lines, each paragraph indented by its block and `starts`. A pill's chip
+/// that would end a line apart from its label, or run past the line's end, moves to the next line.
+#[allow(clippy::too_many_arguments)]
+fn break_lines_at(
+    layout: &mut Layout<Ink>,
+    blocks: &[crate::Block],
+    first_indent: f32,
+    starts: Starts,
     font_size: f32,
     scale: f32,
     max_width: Option<f32>,
@@ -100,7 +146,7 @@ fn break_lines_with_blocks_at(
     // can adjust the first misplaced pill or span-box spacer in every paragraph at once.
     let mut lines_meta = Vec::new();
     for _ in 0..=2 * (pills + span_boxes) {
-        break_lines_capped(layout, blocks, first_indent, font_size, scale, max_width, &caps, &mut lines_meta, y_frac);
+        break_lines_capped(layout, blocks, first_indent, starts, font_size, scale, max_width, &caps, &mut lines_meta, y_frac);
         if max_width.is_none() || (pills == 0 && span_boxes == 0) || !collect_misplaced_pills(layout, &lines_meta, &mut caps) {
             return;
         }
@@ -115,6 +161,7 @@ fn break_lines_capped(
     layout: &mut Layout<Ink>,
     blocks: &[crate::Block],
     first_indent: f32,
+    starts: Starts,
     font_size: f32,
     scale: f32,
     max_width: Option<f32>,
@@ -124,6 +171,7 @@ fn break_lines_capped(
 ) {
     out.clear();
     let layout_max = max_width.unwrap_or(f32::MAX);
+    let rtl = layout.is_rtl();
     let mut breaker = layout.break_lines();
     if y_frac != 0.0 {
         breaker.state_mut().set_line_y(y_frac);
@@ -133,9 +181,13 @@ fn break_lines_capped(
     while !breaker.is_done() {
         let blk = blocks.get(para_idx).copied().unwrap_or(crate::Block::Paragraph);
         let [indent, right_pad] = blk.pad_px(font_size, scale);
+        // A paragraph's own indent is from its start edge: a right-to-left line, which ends
+        // at the left, gives up the room at its right instead.
+        let own = if line_in_para == 0 { starts.first } else { starts.rest };
         let line_max = max_width
-            .map_or(f32::MAX, |w| (w - indent - right_pad).max(1.0))
+            .map_or(f32::MAX, |w| (w - indent - own - right_pad).max(1.0))
             .min(layout_max);
+        let indent = if rtl { indent } else { indent + own };
         let key = (para_idx, line_in_para);
         let text_indent = if key == (0, 0) { first_indent } else { 0.0 };
         let content_room = max_width.map_or(f32::MAX, |_| (line_max - text_indent).max(1.0));

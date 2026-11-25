@@ -146,8 +146,10 @@ pub struct Paragraph {
     /// Left indent and right padding in device px for this paragraph's [`Block`].
     pad: [f32; 2],
     pub flow: Flow,
+    /// Where it starts with no words, from its start edge: its [`ParagraphStyle`]'s indent.
+    start_x: f32,
     /// What its layout depends on but the width: its words, their shaping spans, its pills,
-    /// block and direction, in the field's style.
+    /// block, direction and [`ParagraphStyle`], in the field's style.
     key: u64,
     /// Its pills' labels, as bytes from its start, each shaped between FSI and PDI.
     isolates: Box<[(u32, u32)]>,
@@ -177,6 +179,7 @@ pub struct Piece<'a> {
     pub index: usize,
     pub shaped: bool,
     pad: [f32; 2],
+    start_x: f32,
     isolates: &'a [(u32, u32)],
     disjoint_spans: bool,
     whole: bool,
@@ -184,11 +187,11 @@ pub struct Piece<'a> {
 
 impl<'a> Piece<'a> {
     pub(crate) fn of_paragraph(k: usize, p: &'a Paragraph, disjoint_spans: bool) -> Piece<'a> {
-        Piece { layout: &p.layout, shared: Some(&p.layout), start: p.start, end: p.end, y: p.y, height: p.height, flow: p.flow, index: k, shaped: p.shaped, pad: p.pad, isolates: &p.isolates, disjoint_spans, whole: false }
+        Piece { layout: &p.layout, shared: Some(&p.layout), start: p.start, end: p.end, y: p.y, height: p.height, flow: p.flow, index: k, shaped: p.shaped, pad: p.pad, start_x: p.start_x, isolates: &p.isolates, disjoint_spans, whole: false }
     }
 
     fn whole(layout: &'a Layout<Ink>) -> Piece<'a> {
-        Piece { layout, shared: None, start: 0, end: usize::MAX, y: 0.0, height: layout.height(), flow: Flow::of_layout(layout), index: 0, shaped: true, pad: [0.0, 0.0], isolates: &[], disjoint_spans: false, whole: true }
+        Piece { layout, shared: None, start: 0, end: usize::MAX, y: 0.0, height: layout.height(), flow: Flow::of_layout(layout), index: 0, shaped: true, pad: [0.0, 0.0], start_x: 0.0, isolates: &[], disjoint_spans: false, whole: true }
     }
 
     /// Whether it's a text's one layout rather than a paragraph of a field's.
@@ -469,8 +472,8 @@ impl<'a> TextFlow<'a> {
             0.0
         };
         match (p.flow, self) {
-            (Flow::Rtl, TextFlow::Paragraphs(pl)) => (pl.max_width.unwrap_or(pl.width) - p.pad[1] - indent - size).max(p.pad[0]),
-            _ => p.pad[0] + indent,
+            (Flow::Rtl, TextFlow::Paragraphs(pl)) => (pl.max_width.unwrap_or(pl.width) - p.pad[1] - p.start_x - indent - size).max(p.pad[0]),
+            _ => p.pad[0] + p.start_x + indent,
         }
     }
 
@@ -835,16 +838,19 @@ impl TextSystem {
             return TextLayout::Single(self.layout_for_spec(spec, scale, max_width, align));
         }
         let forced = spec.paragraphs_flow();
+        let styles = spec.paragraph_styles;
         // One paragraph and no pills, as most drafts are: one layout in its own direction.
-        if !spec.by_line && spec.pills.is_empty() && spec.span_boxes.is_empty() && spec.inline_boxes.is_empty() && !spec.content.contains('\n') {
+        if styles.is_empty() && !spec.by_line && spec.pills.is_empty() && spec.span_boxes.is_empty() && spec.inline_boxes.is_empty() && !spec.content.contains('\n') {
             let base = forced.or_else(|| flow_of(spec.content, &[])).unwrap_or(spec.plaintext_flow()).base();
             let shape = spec.shape_key.map(|k| hash::directed(k, base));
-            return TextLayout::Single(self.layout_keyed(shape, spec.content, spec.spans, spec.blocks, spec.text_indent, &[], &[], &[], spec.style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Cached, base));
+            return TextLayout::Single(self.layout_keyed(shape, spec.content, spec.spans, spec.blocks, spec.text_indent, &[], &[], &[], spec.style, scale, max_width, align, spec.wrap_anywhere, false, Keep::Cached, base, Inset::default()));
         }
         self.follow_language();
         let whole = spec.shape_key.unwrap_or_else(|| spec.fresh_shape_key(scale));
         // Lines with no strong character take the element's flow, so it keys the whole too.
         let whole = if forced.unwrap_or(spec.plaintext_flow()) == Flow::Rtl { whole ^ 0x3c6e_f372_fe94_f82b } else { whole };
+        // The space above a paragraph moves those under it, so every style keys the whole.
+        let whole = if styles.is_empty() { whole } else { hash::styles_key(whole, styles) };
         let blocks = spec.blocks;
         let indented = blocks.iter().any(|&b| b != Block::Paragraph).then_some(blocks);
         let pretty = spec.by_line && spec.pretty && !input && max_width.is_some() && !matches!(spec.style.family, Family::Mono | Family::SystemMono);
@@ -894,7 +900,7 @@ impl TextSystem {
         // and after it keep their keys (`reuse_keys`), so a keystroke or recolour costs no full scan.
         let layout_spans: Vec<Span> = span::layout_spans(spec.spans).cloned().collect();
         let layout_disjoint = layout_spans.len() <= 1 || layout_spans.windows(2).all(|w| w[0].start < w[0].end && w[0].end <= w[1].start);
-        let no_pills_or_blocks = spec.pills.is_empty() && spec.span_boxes.is_empty() && spec.inline_boxes.is_empty() && spec.text_indent == 0.0 && spec.blocks.iter().all(|&b| b == Block::Paragraph);
+        let no_pills_or_blocks = spec.pills.is_empty() && spec.span_boxes.is_empty() && spec.inline_boxes.is_empty() && spec.paragraph_styles.is_empty() && spec.text_indent == 0.0 && spec.blocks.iter().all(|&b| b == Block::Paragraph);
         let plain = layout_spans.is_empty() && no_pills_or_blocks;
         let disjoint_spans = spec.spans.len() <= 1 || spec.spans.windows(2).all(|w| w[0].start < w[0].end && w[0].end <= w[1].start);
         let forced = spec.paragraphs_flow();
@@ -974,10 +980,12 @@ impl TextSystem {
             if let Some((line_h, height, w, lines, layout, run)) = wait {
                 waiting += 1;
                 (width, full_width) = (width.max(w), full_width.max(w));
-                paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, y_frac: 0.0, height, widths: [w, w], pad, flow, key, isolates, layout, shaped: false, lines, run });
+                paragraphs.push(Paragraph { start: a, end: b, y: y.round() as f32, y_frac: 0.0, height, widths: [w, w], pad, flow, start_x: 0.0, key, isolates, layout, shaped: false, lines, run });
                 for _ in 0..lines { y += f64::from(line_h); }
                 continue;
             }
+            let own = spec.paragraph_styles.get(k).copied().unwrap_or_default();
+            let inset = own.inset(scale, shaped(&isolates, own.hung().min(b - a)), shaped(&isolates, own.led().min(b - a)));
             let para_indent = if k == 0 { spec.text_indent } else { 0.0 };
             let para_rebreak = rebreak || (k == 0 && rebreak_first);
             // The same paragraph at the other width (the same text, so the same index).
@@ -990,7 +998,7 @@ impl TextSystem {
                 (_, Some(o)) => {
                     fresh += b - a;
                     let mut l = o.layout.clone();
-                    line_break::rebreak(Rc::make_mut(&mut l), blocks, para_indent, style.size, scale, max_width, align);
+                    line_break::rebreak(Rc::make_mut(&mut l), blocks, para_indent, inset, style.size, scale, max_width, align);
                     // Re-broken, in place or as a copy: the lines it draws now are new.
                     self.layout_ids.build(&l);
                     l
@@ -1003,25 +1011,28 @@ impl TextSystem {
                     let spans: Vec<Span> = spans_in(&layout_spans, a, b, &isolates, layout_disjoint).collect();
                     let pills: Vec<PillChip> = pills_in(spec.pills, a, b, &isolates).collect();
                     let span_boxes: Vec<SpanBoxRun> = span_boxes_in(spec.span_boxes, a, b, &isolates).collect();
-                    self.layout_keyed(Some(key), &text, &spans, blocks, para_indent, &pills, &span_boxes, &[], style, scale, max_width, align, spec.wrap_anywhere, pretty, Keep::Owned, flow.base())
+                    self.layout_keyed(Some(key), &text, &spans, blocks, para_indent, &pills, &span_boxes, &[], style, scale, max_width, align, spec.wrap_anywhere, pretty, Keep::Owned, flow.base(), inset)
                 }
             };
             // A paragraph kept as it was keeps its measures too: touching 2,000 layouts to read
             // them again costs more than the edit.
+            let line = if inset.line_height > 0.0 { inset.line_height * scale } else { line };
             let (mut height, mut widths) = match (kept, again) {
                 (Some(o), None) => (o.height, o.widths),
                 _ => (if a == b { layout.height().max(line) } else { layout.height() }, [layout.width(), layout.full_width()]),
             };
+            y += f64::from(own.space_px(scale));
             let want_frac = if layout.len() > 1 { (y - y.floor()) as f32 } else { 0.0 };
             let have_frac = match (kept, again) { (Some(o), None) => o.y_frac, _ => 0.0 };
             if (want_frac - have_frac).abs() > 1e-5 {
-                line_break::rebreak_at_y(Rc::make_mut(&mut layout), blocks, para_indent, style.size, scale, max_width, align, f64::from(want_frac));
+                line_break::rebreak_at_y(Rc::make_mut(&mut layout), blocks, para_indent, inset, style.size, scale, max_width, align, f64::from(want_frac));
                 self.layout_ids.build(&layout);
                 (height, widths) = (if a == b { layout.height().max(line) } else { layout.height() }, [layout.width(), layout.full_width()]);
             }
             let py = if want_frac != 0.0 { y.floor() as f32 } else { y.round() as f32 };
             (width, full_width) = (width.max(widths[0]), full_width.max(widths[1]));
-            paragraphs.push(Paragraph { start: a, end: b, y: py, y_frac: want_frac, height, widths, pad, flow, key, isolates, layout, shaped: true, lines: 1, run: false });
+            let start_x = (inset.indent + inset.first).max(0.0);
+            paragraphs.push(Paragraph { start: a, end: b, y: py, y_frac: want_frac, height, widths, pad, flow, start_x, key, isolates, layout, shaped: true, lines: 1, run: false });
             y += f64::from(height);
         }
         let (asc, desc) = self.primary_extents(style.family, style.weight, style.italic).unwrap_or((0.8, 0.2));

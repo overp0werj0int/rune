@@ -128,6 +128,23 @@ pub(crate) fn break_key(shape: u64, max_width: Option<f32>, align: parley::Align
     h.finish()
 }
 
+/// `key` for a layout shaped and broken with a paragraph's `inset`.
+pub(crate) fn inset_key(key: u64, inset: crate::Inset) -> u64 {
+    let mut h = KeyHasher::default();
+    (key, inset.bits()).hash(&mut h);
+    h.finish()
+}
+
+/// `whole` for a by-paragraph text laid out with `styles`.
+pub(crate) fn styles_key(whole: u64, styles: &[crate::ParagraphStyle]) -> u64 {
+    let mut h = KeyHasher::default();
+    whole.hash(&mut h);
+    for s in styles {
+        s.bits().hash(&mut h);
+    }
+    h.finish()
+}
+
 /// A truncated or line-clamped cut of `shape` at `max_width`.
 #[doc(hidden)]
 pub fn elide_key(

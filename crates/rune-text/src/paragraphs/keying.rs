@@ -134,6 +134,9 @@ pub(super) fn key_paragraphs(spec: &TextInput<'_>, layout_spans: &[Span], style_
         let flow = forced.or_else(|| flow_of(words, &isolates)).unwrap_or(last_flow);
         let mut h = hash::KeyHasher::default();
         (words, style_key, flow == Flow::Rtl, spec.blocks.get(k).copied().unwrap_or(Block::Paragraph)).hash(&mut h);
+        if let Some(s) = spec.paragraph_styles.get(k) {
+            s.layout_bits().hash(&mut h);
+        }
         let line_spans: Vec<Span> = spans_in(layout_spans, a, b, &isolates, disjoint_spans).collect();
         for s in span::layout_spans(&line_spans) {
             s.hash_layout(&mut h);

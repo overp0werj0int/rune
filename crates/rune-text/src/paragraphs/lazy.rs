@@ -156,8 +156,8 @@ impl TextSystem {
         };
         if let Some(m) = self.ascii.get(&key) { return m.clone(); }
         let sample: String = (0x21u8..0x7f).flat_map(|b| [b as char, ' ']).collect();
-        let l = self.layout_keyed(None, &sample, &[], &[], 0.0, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base());
-        let empty = self.layout_keyed(None, "", &[], &[], 0.0, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base());
+        let l = self.layout_keyed(None, &sample, &[], &[], 0.0, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base(), Inset::default());
+        let empty = self.layout_keyed(None, "", &[], &[], 0.0, &[], &[], &[], style, scale, None, Alignment::Start, wrap_anywhere, false, Keep::Owned, Flow::Ltr.base(), Inset::default());
         let measured = (|| {
             let line = l.lines().next().filter(|_| l.lines().count() == 1)?;
             let mut runs = line.runs();
@@ -215,7 +215,7 @@ impl TextSystem {
             let p = &mut paragraphs[k];
             let words = &lazy.content[p.start..p.end];
             let spans: Vec<Span> = spans_in(&lazy.spans, p.start, p.end, &[], lazy.disjoint_spans).collect();
-            let l = self.layout_keyed(Some(p.key), words, &spans, &[], 0.0, &[], &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base());
+            let l = self.layout_keyed(Some(p.key), words, &spans, &[], 0.0, &[], &[], &[], lazy.style, lazy.scale, laid.max_width, laid.align, lazy.wrap_anywhere, false, Keep::Owned, p.flow.base(), Inset::default());
             moved |= l.height() != p.height;
             (p.height, p.widths, p.layout, p.shaped) = (l.height(), [l.width(), l.full_width()], l, true);
             shaped_any = true;
@@ -224,7 +224,7 @@ impl TextSystem {
         for p in &mut paragraphs {
             let want_frac = if p.shaped && p.layout.len() > 1 { (y - y.floor()) as f32 } else { 0.0 };
             if p.shaped && (want_frac - p.y_frac).abs() > 1e-5 {
-                line_break::rebreak_at_y(Rc::make_mut(&mut p.layout), &[], 0.0, lazy.style.size, lazy.scale, laid.max_width, laid.align, f64::from(want_frac));
+                line_break::rebreak_at_y(Rc::make_mut(&mut p.layout), &[], 0.0, Inset::default(), lazy.style.size, lazy.scale, laid.max_width, laid.align, f64::from(want_frac));
                 self.layout_ids.build(&p.layout);
                 (p.height, p.widths) = (p.layout.height(), [p.layout.width(), p.layout.full_width()]);
             }
@@ -296,7 +296,7 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
                     sp.hash_layout(&mut hs);
                 }
                 let height = (f64::from(lines) * f64::from(h)) as f32;
-                out.push(Paragraph { start, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [widest, widest], pad: [0.0, 0.0], flow, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
+                out.push(Paragraph { start, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [widest, widest], pad: [0.0, 0.0], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines, run: true });
                 y += f64::from(height);
             }
             continue;
@@ -308,7 +308,7 @@ fn split_run(lazy: &Lazy, max_width: Option<f32>, paragraphs: &[Paragraph], k: u
             sp.hash_layout(&mut hs);
         }
         let (height, w) = lazy.ascii.one_line(words, max_width, 0.0, true).unwrap_or((h, 0.0));
-        out.push(Paragraph { start: s, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [w, w], pad: [0.0, 0.0], flow, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
+        out.push(Paragraph { start: s, end: e, y: y.round() as f32, y_frac: 0.0, height, widths: [w, w], pad: [0.0, 0.0], flow, start_x: 0.0, key: hs.finish(), isolates: Box::default(), layout: r.layout.clone(), shaped: false, lines: 1, run: false });
         y += f64::from(height);
     }
     out

@@ -11,7 +11,7 @@ use crate::fonts::fallback::{self, Route};
 use crate::fonts::{language, system_weight};
 use crate::raster::synthetic_bold;
 use crate::{
-    Entry, HIDDEN_SIZE, INLINE_BOX, InlineAlign, InlineBoxRun, Ink, Keep, PILL_BOX, PillChip, PillMetrics, SPAN_BOX, Span, SpanBoxRun, TextSystem, Trak,
+    Entry, HIDDEN_SIZE, INLINE_BOX, InlineAlign, InlineBoxRun, Ink, Inset, Keep, PILL_BOX, PillChip, PillMetrics, SPAN_BOX, Span, SpanBoxRun, TextSystem, Trak,
     family_list, font_trak, mono_tab_stops, named_list, shape_key,
 };
 use rune_core::tok::{Family, OpticalSize, TextStyle};
@@ -66,6 +66,7 @@ impl TextSystem {
         pretty: bool,
         keep: Keep,
         base: parley::BaseDirection,
+        inset: Inset,
     ) -> Rc<Layout<Ink>> {
         self.follow_language();
         let cache = keep == Keep::Cached;
@@ -80,6 +81,7 @@ impl TextSystem {
             let k = hash::mix_inline_boxes(k, inline_boxes);
             hash::directed(k, base)
         });
+        let shape_key = if inset == Inset::default() { shape_key } else { hash::inset_key(shape_key, inset) };
         // Pretty wrapping breaks only wrapped proportional text again.
         let pretty = pretty && max_width.is_some() && !matches!(style.family, Family::Mono | Family::SystemMono);
         let key = hash::break_key(shape_key, max_width, align, has_indented_blocks.then_some(blocks), text_indent) ^ if pretty { 0x7072_6574_7479_0001 } else { 0 };
@@ -127,7 +129,7 @@ impl TextSystem {
             })
             .collect();
         let indented = has_indented_blocks || !pills.is_empty() || !padded_boxes.is_empty();
-        let break_lines = |layout: &mut Layout<Ink>| line_break::break_new(layout, text, blocks, text_indent, indented, style.size, scale, max_width, pretty);
+        let break_lines = |layout: &mut Layout<Ink>| line_break::break_new(layout, text, blocks, text_indent, inset, indented, style.size, scale, max_width, pretty);
         if cache
             && let Some(prev) = self.shapes.get(&shape_key).copied()
             && let Some(Entry { value: shaped, used, .. }) = self.layouts.get(&prev)
@@ -402,7 +404,9 @@ impl TextSystem {
             if !settings.is_empty() {
                 b.push_default(parley::FontVariations::List(std::borrow::Cow::Owned(settings)));
             }
-            b.push_default(LineHeight::Absolute(style.line_px()));
+            // A paragraph's own line height holds for every run of it, whatever its size.
+            let own_line = (inset.line_height > 0.0).then_some(inset.line_height);
+            b.push_default(LineHeight::Absolute(own_line.unwrap_or(style.line_px())));
             b.push_default(StyleProperty::LineBreak(LINE_BREAK));
             if wrap_anywhere {
                 b.push_default(StyleProperty::OverflowWrap(parley::OverflowWrap::Anywhere));
@@ -436,7 +440,7 @@ impl TextSystem {
                     b.push(StyleProperty::FontSize(sz), r.clone());
                     // CSS's unitless line-height: a span of its own size (inline code, a smaller run) keeps the
                     // paragraph's leading ratio, so its box fits inside the line instead of growing it
-                    b.push(LineHeight::FontSizeRelative(style.line_px() / style.size), r.clone());
+                    b.push(own_line.map_or(LineHeight::FontSizeRelative(style.line_px() / style.size), LineHeight::Absolute), r.clone());
                 }
                 let resized = s.size.is_some() && style.optical_size == OpticalSize::Auto;
                 if resized || span_axes[i] != base_axes {

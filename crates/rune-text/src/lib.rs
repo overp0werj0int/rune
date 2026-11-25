@@ -35,6 +35,7 @@ mod layout;
 mod measure;
 #[doc(hidden)]
 pub mod outline;
+mod paragraph_style;
 mod paragraphs;
 #[doc(hidden)]
 pub mod profile;
@@ -212,6 +213,8 @@ pub use measure::primary_extents;
 pub use measure::with_families;
 pub use measure::with_fonts;
 pub use outline::Outline;
+pub(crate) use paragraph_style::Inset;
+pub use paragraph_style::ParagraphStyle;
 #[doc(hidden)]
 pub use paragraphs::AsciiLine;
 #[doc(hidden)]

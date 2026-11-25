@@ -22,6 +22,7 @@ fn layout_with_boxes(
         content,
         spans: &[],
         blocks: &[],
+        paragraph_styles: &[],
         pills: &[],
         span_boxes,
         inline_boxes: &[],

@@ -325,6 +325,7 @@ fn measure_inline_matches_layout_to_the_bit() {
             content: body,
             spans: &[],
             blocks: &[],
+            paragraph_styles: &[],
             pills: &[],
             span_boxes: &[],
             inline_boxes: &runs,
