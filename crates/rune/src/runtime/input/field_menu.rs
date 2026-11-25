@@ -34,6 +34,53 @@ pub(crate) struct PendingFieldMenu {
 }
 
 impl RuntimeCore {
+    /// Focuses field `i` for its menu and, for a press at window point `hit_at`, places the caret:
+    /// a press in the selection keeps it for Cut and Copy. Elsewhere it moves the caret there and,
+    /// with `spell`, on a misspelled word selects the word, as Chromium does.
+    fn press_caret(&mut self, app: &mut dyn AppDriver, i: usize, hit_at: Option<(f32, f32)>, spell: bool, one: &mut Tx) {
+        let path = self.tree.nodes[i].path.clone();
+        let Some(input) = self.tree.nodes[i].input.as_deref() else { return };
+        let Some(access) = input.access.clone() else { return };
+        let selection_change = input.selection_change.clone();
+        let single = input.single_line;
+        let layout = self.tree.nodes[i].text_layout.clone();
+        let point = hit_at.and_then(|(x, y)| self.input_text_point(i, x, y));
+        let s = self.env.scale;
+        if self.kbd.focus.path() != Some(path.as_str()) {
+            self.set_focus(app, Some(path), false);
+        }
+        let changed_sel = {
+            let e = access(app.states());
+            e.set_single_line(single);
+            let before = (e.anchor, e.focus);
+            if let (Some([tx, ty]), Some(l)) = (point, layout.as_ref().map(TextLayout::view))
+                && e.preedit().is_none()
+            {
+                let caret = hit(e, l, tx, ty, s, single).caret;
+                let (a, b) = e.range();
+                if a == b || caret < a || caret > b {
+                    match spell.then(|| crate::spell::misspelled_at(&e.text, caret)).flatten() {
+                        Some((wa, wb)) => e.set_selection(wa, wb),
+                        None => e.set_caret(caret),
+                    }
+                }
+            }
+            (e.anchor, e.focus) != before
+        };
+        if changed_sel && let Some(selection_change) = selection_change {
+            selection_change(app.states(), one);
+        }
+    }
+
+    /// A secondary press on a field whose own `on_secondary_press` draws its menu: the caret
+    /// goes where its field menu would put it, before the app's handler runs.
+    pub(in crate::runtime) fn field_caret(&mut self, app: &mut dyn AppDriver, path: String, hit_at: (f32, f32), one: &mut Tx) -> bool {
+        let Some(i) = self.live(&path) else { return false };
+        if self.node_disabled(i) { return false; }
+        self.press_caret(app, i, Some(hit_at), false, one);
+        true
+    }
+
     /// Opens field `path`'s menu at window point `at`, pressed at window point `hit_at`, or from
     /// the keyboard (`None`).
     fn field_menu_fallback_active(&self) -> bool {
@@ -55,42 +102,13 @@ impl RuntimeCore {
         {
             return true;
         }
-        let selection_change = input.selection_change.clone();
         let Some(access) = input.access.clone() else { return false };
-        let (single, secure) = (input.single_line, input.edit.is_secure());
+        let secure = input.edit.is_secure();
         let read_only = self.is_node_read_only(i);
         let spell = input.spellcheck && !secure && !read_only;
-        let layout = self.tree.nodes[i].text_layout.clone();
-        let point = hit_at.and_then(|(x, y)| self.input_text_point(i, x, y));
-        let s = self.env.scale;
         let toggle = std::iter::successors(Some(i), |&j| self.tree.nodes[j].parent).find_map(|j| self.tree.nodes[j].handlers.on_spellcheck.clone());
         let keep = std::iter::successors(Some(i), |&j| self.tree.nodes[j].parent).find_map(|j| self.tree.nodes[j].handlers.on_spellcheck_languages.clone());
-        if self.kbd.focus.path() != Some(path.as_str()) {
-            self.set_focus(app, Some(path.clone()), false);
-        }
-        let changed_sel = {
-            let e = access(app.states());
-            e.set_single_line(single);
-            let before = (e.anchor, e.focus);
-            if let (Some([tx, ty]), Some(l)) = (point, layout.as_ref().map(TextLayout::view))
-                && e.preedit().is_none()
-            {
-                let caret = hit(e, l, tx, ty, s, single).caret;
-                let (a, b) = e.range();
-                // A press in the selection keeps it for Cut and Copy. Elsewhere it moves the caret
-                // there, and on a misspelled word selects the word, as Chromium does.
-                if a == b || caret < a || caret > b {
-                    match spell.then(|| crate::spell::misspelled_at(&e.text, caret)).flatten() {
-                        Some((wa, wb)) => e.set_selection(wa, wb),
-                        None => e.set_caret(caret),
-                    }
-                }
-            }
-            (e.anchor, e.focus) != before
-        };
-        if changed_sel && let Some(selection_change) = selection_change {
-            selection_change(app.states(), one);
-        }
+        self.press_caret(app, i, hit_at, spell, one);
         let e = access(app.states());
         let (a, b) = e.range();
         let word = spell

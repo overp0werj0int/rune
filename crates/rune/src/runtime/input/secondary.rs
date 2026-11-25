@@ -451,6 +451,9 @@ impl RuntimeCore {
                 if self.tree.nodes[i].handlers.on_secondary_press.is_none() && self.editable_field_menu(i) {
                     return self.field_menu(app, path, up, Some(up), one);
                 }
+                if self.editable_field_menu(i) {
+                    self.field_caret(app, path.clone(), up, one);
+                }
                 let Some(f) = self.tree.nodes[i].handlers.on_secondary_press.clone() else { return false };
                 log_event!(self, "secondary press {path}");
                 f(app.states(), point, one);
@@ -460,10 +463,16 @@ impl RuntimeCore {
     }
 
     /// A secondary press at (x, y) on text field `path` with no `on_secondary_press` of its own:
-    /// its menu (`field_menu`), queued.
+    /// its menu (`field_menu`), queued. With one, the caret moves as for that menu
+    /// (`field_caret`) and false lets the app's handler run after it, so an app that draws its
+    /// own field menu (where there are no native menus) finds the caret where the press was.
     fn queue_field_menu(&mut self, path: &str, x: f32, y: f32) -> bool {
         let Some(i) = self.live(path) else { return false };
-        if self.tree.nodes[i].handlers.on_secondary_press.is_some() || !self.editable_field_menu(i) { return false; }
+        if !self.editable_field_menu(i) { return false; }
+        if self.tree.nodes[i].handlers.on_secondary_press.is_some() {
+            self.frame.queue.push(Action::FieldCaret(path.to_owned(), (x, y)));
+            return false;
+        }
         self.frame.queue.push(Action::FieldMenu(path.to_owned(), (x, y), Some((x, y))));
         true
     }
@@ -472,7 +481,9 @@ impl RuntimeCore {
     /// menu. That is its focused link's `on_link_secondary`, else its active descendant's
     /// `on_secondary_press` when mounted (a tree or list keeping focus on its container), else
     /// its own or its nearest ancestor's `on_secondary_press`, at the bottom-left of that
-    /// element, where a menu opens below it as AppKit's and Windows' keyboard menus do.
+    /// element, where a menu opens below it as AppKit's and Windows' keyboard menus do. In a
+    /// text field it opens below the caret, as a text view's keyboard menu does, not at the
+    /// field's far corner. A menu it opens comes from the keyboard, so its first item shows focus.
     pub(in crate::runtime) fn context_menu_key(&mut self, app: &mut dyn AppDriver, ev: &KeyEvent, tx: &mut Tx) -> bool {
         let m = ev.mods;
         let plain = !m.cmd && !m.ctrl && !m.alt && !m.logo;
@@ -501,6 +512,7 @@ impl RuntimeCore {
                     let path = self.tree.nodes[active].path.clone();
                     let point = self.pointer_event(active, x, y);
                     log_event!(self, "secondary press {path}");
+                    self.kbd.focus.step(super::focus_machine::FocusEvent::Navigated);
                     f(app.states(), point, tx);
                     return true;
                 }
@@ -510,7 +522,10 @@ impl RuntimeCore {
                 }
             }
         }
-        let (x, y) = (fx0, fy1);
+        let (x, y) = match self.caret_rect(&self.tree.nodes, focused) {
+            Some([cx, cy, _, ch]) => (cx, cy + ch),
+            None => (fx0, fy1),
+        };
         if self.tree.nodes[focused].handlers.on_secondary_press.is_none() && self.editable_field_menu(focused) {
             let path = self.tree.nodes[focused].path.clone();
             return self.field_menu(app, path, (x, y), None, tx);
@@ -524,6 +539,9 @@ impl RuntimeCore {
                 let path = n.path.clone();
                 let point = self.pointer_event(index, x, y);
                 log_event!(self, "secondary press {path}");
+                // A menu the keyboard opened marks its first item, as a menu opened by Tab or
+                // the arrows would.
+                self.kbd.focus.step(super::focus_machine::FocusEvent::Navigated);
                 f(app.states(), point, tx);
                 return true;
             }
