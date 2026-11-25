@@ -57,6 +57,7 @@ pub(crate) trait AppDriver: ViewDriver {
     fn on_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool;
     fn has_on_focus(&self) -> bool;
     fn on_focus(&mut self, focused: bool, tx: &mut Tx);
+    fn on_touchpad_hold(&mut self);
     fn has_on_mods(&self) -> bool;
     fn on_mods(&mut self, mods: crate::Mods, tx: &mut Tx) -> bool;
     fn has_on_visibility(&self) -> bool;
@@ -78,6 +79,7 @@ pub(crate) trait AppDriver: ViewDriver {
 pub(crate) struct RuntimeHooks<S: 'static> {
     pub(crate) view: fn(&S, &mut Cx<S>) -> El,
     pub(crate) on_focus: Option<fn(&mut S, bool, &mut Tx)>,
+    pub(crate) on_touchpad_hold: Option<fn(&mut S)>,
     pub(crate) on_mods: Option<fn(&mut S, crate::Mods, &mut Tx)>,
     pub(crate) on_visibility: Option<fn(&mut S, bool, &mut Tx)>,
     pub(crate) on_ime: Option<fn(&mut S, &Ime, &mut Tx) -> bool>,
@@ -91,6 +93,7 @@ impl<S: 'static> RuntimeHooks<S> {
         Self {
             view,
             on_focus: None,
+            on_touchpad_hold: None,
             on_mods: None,
             on_visibility: None,
             on_ime: None,
@@ -190,6 +193,12 @@ impl<S: 'static> AppDriver for AppRefMut<'_, S> {
     fn on_focus(&mut self, focused: bool, tx: &mut Tx) {
         if let Some(f) = self.hooks.on_focus {
             app_call!(f, self.state, focused, tx);
+        }
+    }
+
+    fn on_touchpad_hold(&mut self) {
+        if let Some(f) = self.hooks.on_touchpad_hold {
+            app_call!(f, self.state);
         }
     }
 

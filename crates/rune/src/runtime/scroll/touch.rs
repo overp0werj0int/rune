@@ -216,7 +216,7 @@ impl RuntimeCore {
                     if let Some(st) = self.scroll.scrolls.get_mut(&id) { st.halt(); }
                 }
                 TouchEffect::StopAcross(id) => {
-                    if let Some(st) = self.scroll.scrolls.get_mut(&id) && matches!(st.x.motion, XMotion::Momentum(_) | XMotion::Wheel(_)) { st.x.motion = XMotion::Rest; }
+                    if let Some(st) = self.scroll.scrolls.get_mut(&id) && matches!(st.x.motion, XMotion::Momentum(_) | XMotion::Wheel(_) | XMotion::Fling(_)) { st.x.motion = XMotion::Rest; }
                 }
                 TouchEffect::Fling { id, horizontal, velocity } => {
                     let Some(st) = self.scroll.scrolls.get_mut(&id) else { continue };

@@ -926,6 +926,8 @@ impl<S: 'static> WindowSpec<S> {
         /// ```
         prewarm_effects(effects: impl Into<crate::PrewarmEffects>);
         on_focus(f: fn(&mut S, bool, &mut crate::Tx));
+        /// Called when a trackpad's fingers land (Wayland's hold gesture), like `App::on_touchpad_hold`.
+        on_touchpad_hold(f: fn(&mut S));
         on_modifiers(f: fn(&mut S, crate::Mods, &mut crate::Tx));
         /// This window going off screen and back, like `App::on_visibility`.
         on_visibility(f: fn(&mut S, bool, &mut crate::Tx));

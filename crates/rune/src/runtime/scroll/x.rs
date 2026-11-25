@@ -505,6 +505,15 @@ impl requests::ScrollTables {
                 moving = true;
             }
             XMotion::Momentum(_) => st.x.motion = XMotion::Rest,
+            XMotion::Fling(mut fling) => {
+                let before = st.x.offset;
+                let (delta, running) = fling.step(f64::from(dt));
+                st.x.offset += delta;
+                let edge = st.x.offset <= 0.0 || st.x.offset >= st.x.max;
+                st.x.motion = if running && !edge { XMotion::Fling(fling) } else { XMotion::Rest };
+                if (st.x.offset - before).abs() > 1e-6 { st.note_source(crate::ScrollSource::Momentum); }
+                moving = true;
+            }
             XMotion::Wheel(mut curve) => {
                 let before = st.x.offset;
                 curve.follow(st.x.offset);

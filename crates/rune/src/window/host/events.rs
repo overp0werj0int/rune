@@ -636,8 +636,13 @@ impl Host {
                 host_events::ime(app.rt_mut(), &l.window, &mut self.ime, ime);
                 l.request_redraw();
             }
-            WindowEvent::MouseWheel { delta, phase, .. } => {
-                host_events::wheel(app.rt_mut(), delta, gesture_phase(phase), scale, self.mods);
+            WindowEvent::MouseWheel { delta, phase, time, .. } => {
+                host_events::wheel_timed(app.rt_mut(), delta, gesture_phase(phase), time.map(|t| t.as_secs_f64()), scale, self.mods);
+                l.request_redraw();
+            }
+            // Fingers resting on the touchpad stop a fling.
+            WindowEvent::HoldGesture { phase: winit::event::TouchPhase::Started, time, .. } => {
+                app.touchpad_hold(time.map(|t| t.as_secs_f64()));
                 l.request_redraw();
             }
             WindowEvent::PinchGesture { delta, phase, .. } => {

@@ -438,7 +438,7 @@ mod tests {
             WindowEvent::CursorLeft { device_id: device },
             WindowEvent::CursorEntered { device_id: device },
             WindowEvent::CursorMoved { device_id: device, position: (1.0, 2.0).into() },
-            WindowEvent::MouseWheel { device_id: device, delta: MouseScrollDelta::LineDelta(0.0, 1.0), phase: TouchPhase::Moved },
+            WindowEvent::MouseWheel { device_id: device, delta: MouseScrollDelta::LineDelta(0.0, 1.0), phase: TouchPhase::Moved, time: None },
             WindowEvent::MouseInput { device_id: device, state: winit::event::ElementState::Pressed, button: winit::event::MouseButton::Left },
         ] {
             assert!(is_system_pointer(&pointer), "{pointer:?}");

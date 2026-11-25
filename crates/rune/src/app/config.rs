@@ -11,6 +11,7 @@ use crate::runtime::Runtime;
 /// together instead of drifting across bootstrap sites.
 pub(crate) struct RuntimeConfig<S: 'static> {
     pub(crate) on_focus: Option<fn(&mut S, bool, &mut Tx)>,
+    pub(crate) on_touchpad_hold: Option<fn(&mut S)>,
     pub(crate) on_mods: Option<fn(&mut S, crate::Mods, &mut Tx)>,
     pub(crate) on_visibility: Option<fn(&mut S, bool, &mut Tx)>,
     pub(crate) on_ime: Option<fn(&mut S, &crate::Ime, &mut Tx) -> bool>,
@@ -45,6 +46,7 @@ impl<S: 'static> Clone for RuntimeConfig<S> {
     fn clone(&self) -> Self {
         Self {
             on_focus: self.on_focus,
+            on_touchpad_hold: self.on_touchpad_hold,
             on_mods: self.on_mods,
             on_visibility: self.on_visibility,
             on_ime: self.on_ime,
@@ -67,6 +69,7 @@ impl<S: 'static> Default for RuntimeConfig<S> {
     fn default() -> Self {
         Self {
             on_focus: None,
+            on_touchpad_hold: None,
             on_mods: None,
             on_visibility: None,
             on_ime: None,
@@ -126,6 +129,7 @@ impl<S: 'static> Runtime<S> {
     pub(crate) fn configure(&mut self, config: RuntimeConfig<S>) {
         let RuntimeConfig {
             on_focus,
+            on_touchpad_hold,
             on_mods,
             on_visibility,
             on_ime,
@@ -143,6 +147,7 @@ impl<S: 'static> Runtime<S> {
         } = config;
         self.core_mut().set_reveal_fps(reveal_fps);
         self.hooks.on_focus = on_focus;
+        self.hooks.on_touchpad_hold = on_touchpad_hold;
         self.hooks.on_mods = on_mods;
         self.hooks.on_visibility = on_visibility;
         self.hooks.on_ime = on_ime;

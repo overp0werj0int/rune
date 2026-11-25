@@ -792,6 +792,15 @@ impl RuntimeCore {
                     moving = true;
                 }
                 ScrollMode::Momentum { .. } => st.mode = st.mode.to_rest(),
+                ScrollMode::Fling { mut fling, .. } => {
+                    let before = st.offset;
+                    let (delta, running) = fling.step(f64::from(dt));
+                    st.offset += delta;
+                    let edge = st.offset <= 0.0 || st.offset >= st.max;
+                    st.mode = if edge || !running { st.mode.to_rest() } else { st.mode.to_fling(fling) };
+                    if (st.offset - before).abs() > 1e-6 { st.note_source(crate::ScrollSource::Momentum); }
+                    moving = true;
+                }
                 ScrollMode::Wheel { mut curve, .. } => {
                     let before = st.offset;
                     curve.follow(st.offset);

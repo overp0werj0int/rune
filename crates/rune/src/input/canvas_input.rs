@@ -43,6 +43,9 @@ pub struct WheelEvent {
     /// Touch pan deltas reach [`El::on_wheel`] handlers only (locked to the `Began` owner) and
     /// never fall through to scroll views.
     pub touch: bool,
+    /// When the platform says the frame happened, in seconds on its own input clock (Wayland's
+    /// event time), where it says so. A trackpad's release velocity is measured on it.
+    pub time: Option<f64>,
 }
 
 impl WheelEvent {
@@ -54,6 +57,7 @@ impl WheelEvent {
     pub fn phase(mut self, phase: GesturePhase) -> Self { self.phase = phase; self }
     pub fn precise(mut self, precise: bool) -> Self { self.precise = precise; self }
     pub fn notch(mut self, notch: bool) -> Self { self.notch = notch; self }
+    pub fn time(mut self, seconds: f64) -> Self { self.time = Some(seconds); self }
     /// Marks this event as a two-finger touchscreen pan delta (`WheelEvent::touch`).
     ///
     /// ```

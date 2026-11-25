@@ -33,6 +33,7 @@ use crate::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, Wind
 use crate::platform_impl::wayland::state::WinitState;
 use crate::platform_impl::wayland::{self, DeviceId, WindowId};
 
+pub mod pointer_gestures;
 pub mod relative_pointer;
 
 impl PointerHandler for WinitState {
@@ -169,7 +170,7 @@ impl PointerHandler for WinitState {
                         window_id,
                     );
                 },
-                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
+                PointerEventKind::Axis { time, horizontal, vertical, source } => {
                     // Get the current phase.
                     let mut pointer_data = pointer.winit_data().inner.lock().unwrap();
 
@@ -219,7 +220,7 @@ impl PointerHandler for WinitState {
                     };
 
                     self.events_sink.push_window_event(
-                        WindowEvent::MouseWheel { device_id, delta, phase },
+                        WindowEvent::MouseWheel { device_id, delta, phase, time: Some(Duration::from_millis(u64::from(time))) },
                         window_id,
                     )
                 },

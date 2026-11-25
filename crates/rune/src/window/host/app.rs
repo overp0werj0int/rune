@@ -113,6 +113,10 @@ impl dyn WindowApp + '_ {
         self.driver(|rt, app| rt.window_focus(app, focused));
     }
 
+    pub(in crate::window) fn touchpad_hold(&mut self, time: Option<f64>) {
+        self.driver(|rt, app| rt.touchpad_hold(app, time));
+    }
+
     pub(in crate::window) fn set_live_visible(&mut self, visible: bool) {
         self.driver(|rt, app| rt.set_live_visible(app, visible));
     }

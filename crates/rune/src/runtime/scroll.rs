@@ -6,6 +6,7 @@ pub(super) mod anchor;
 pub(super) mod bottom;
 pub(super) mod drawn;
 pub(super) mod edge;
+pub(super) mod fling;
 pub(super) mod mode;
 pub(super) mod nudge;
 pub(super) mod offset;

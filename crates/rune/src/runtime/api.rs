@@ -88,6 +88,21 @@ impl<S: 'static> Runtime<S> {
         core.window_focus(&mut app, focused);
     }
 
+    /// A trackpad's fingers landed (Wayland's hold gesture) at platform time `time`, or now:
+    /// a running fling stops where it is, and nothing the fingers did before throws. The app
+    /// hears it too (`App::on_touchpad_hold`), for flings of its own.
+    #[inline(always)]
+    pub fn touchpad_hold(&mut self, time: Option<f64>) {
+        let (core, mut app) = self.split_mut();
+        core.touchpad_hold(&mut app, time);
+    }
+
+    /// Sets [`App::on_touchpad_hold`](crate::App::on_touchpad_hold) on a headless [`Runtime`].
+    #[inline(always)]
+    pub fn set_on_touchpad_hold(&mut self, f: Option<fn(&mut S)>) {
+        self.hooks.on_touchpad_hold = f;
+    }
+
     #[inline(always)]
     pub(crate) fn keys_lost(&mut self) { self.core_mut().keys_lost(); }
     #[inline(always)]

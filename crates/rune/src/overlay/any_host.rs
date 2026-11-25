@@ -364,8 +364,8 @@ impl AnyHost for OverlayHost {
             WindowEvent::CursorLeft { .. } if input_enabled => {
                 core.native_pointer_leave(app);
             }
-            WindowEvent::MouseWheel { delta, phase, .. } if input_enabled => {
-                core.native_mouse_wheel(app, delta, phase);
+            WindowEvent::MouseWheel { delta, phase, time, .. } if input_enabled => {
+                core.native_mouse_wheel(app, delta, phase, time.map(|t| t.as_secs_f64()));
             }
             WindowEvent::PinchGesture { delta, phase, .. } if input_enabled => {
                 core.dirty |= host_events::magnify(app.rt_mut(), delta, host_events::gesture_phase(phase));

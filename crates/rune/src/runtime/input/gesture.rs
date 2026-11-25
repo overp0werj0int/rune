@@ -64,6 +64,7 @@ impl RuntimeCore {
             return;
         }
         if ev.phase == GesturePhase::Began { self.wheel_began(); }
+        self.throw_arrived(&ev);
         let moved = ev.dx != 0.0 || ev.dy != 0.0;
         if moved {
             self.dismiss_help();
@@ -82,6 +83,7 @@ impl RuntimeCore {
                 && let Some(start) = self.offer_wheel(gesture, ev)
             {
                 self.wheel_scroll_for(gesture, ev, phased, start);
+                if ev.phase == GesturePhase::Ended { self.throw_released(gesture, ev.x, ev.y); }
             }
         }
         if ev.phase == GesturePhase::Ended { self.wheel_ended(); }
@@ -190,6 +192,7 @@ impl RuntimeCore {
         if !taken {
             // Queued from an earlier frame: what lies under the pointer may have moved since.
             self.wheel_scroll_for(gesture, ev, phased, WheelStart::Unknown);
+            if ev.phase == GesturePhase::Ended { self.throw_released(gesture, ev.x, ev.y); }
         }
         taken
     }

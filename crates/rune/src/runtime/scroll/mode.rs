@@ -22,6 +22,8 @@ pub(in crate::runtime) enum ScrollMode {
     Glide { v: f32, to: GlideTo, hand: Hand },
     /// Easing to where a notched mouse wheel sent it (`runtime/scroll/wheel.rs`).
     Wheel { curve: WheelCurve, hand: Hand },
+    /// Coasting on a trackpad fling's curve (`runtime/scroll/fling.rs`).
+    Fling { fling: scroll_fling::Fling, hand: Hand },
 }
 
 /// The hand latches a mode carries from frame to frame, whatever moves the offset.
@@ -93,14 +95,14 @@ impl ScrollMode {
     pub(in crate::runtime) fn hand(self) -> Hand {
         match self {
             ScrollMode::Rest(hand) | ScrollMode::Pinned(hand) => hand,
-            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Wheel { hand, .. } => hand,
+            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Wheel { hand, .. } | ScrollMode::Fling { hand, .. } => hand,
         }
     }
 
     fn hand_mut(&mut self) -> &mut Hand {
         match self {
             ScrollMode::Rest(hand) | ScrollMode::Pinned(hand) => hand,
-            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Wheel { hand, .. } => hand,
+            ScrollMode::Momentum { hand, .. } | ScrollMode::Glide { hand, .. } | ScrollMode::Wheel { hand, .. } | ScrollMode::Fling { hand, .. } => hand,
         }
     }
 
@@ -137,6 +139,13 @@ impl ScrollMode {
         ScrollMode::Wheel { curve, hand: self.hand() }
     }
 
+    /// The same mode coasting on `fling`, keeping the hand's latches.
+    pub(in crate::runtime) fn to_fling(self, fling: scroll_fling::Fling) -> Self {
+        #[cfg(test)]
+        note_write();
+        ScrollMode::Fling { fling, hand: self.hand() }
+    }
+
     /// The wheel's ease, while one runs.
     pub(in crate::runtime) fn wheel(self) -> Option<WheelCurve> {
         match self {
@@ -149,6 +158,7 @@ impl ScrollMode {
     pub(in crate::runtime) fn coast(self) -> f32 {
         match self {
             ScrollMode::Momentum { v, .. } => v,
+            ScrollMode::Fling { fling, .. } => fling.velocity() as f32,
             _ => 0.0,
         }
     }

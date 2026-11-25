@@ -445,16 +445,17 @@ impl OverlayCore {
         self.dispatch_button(app, InputSource::Native, button, pressed, None, crate::window::map_mods(self.mods));
     }
 
-    /// Native winit `MouseWheel` routed through `PointerOwnership` and `host_events::wheel`.
+    /// Native winit `MouseWheel` routed through `PointerOwnership` and `host_events::wheel_timed`.
     pub(super) fn native_mouse_wheel(
         &mut self,
         app: &mut dyn OverlayApp,
         delta: winit::event::MouseScrollDelta,
         phase: winit::event::TouchPhase,
+        time: Option<f64>,
     ) {
         if self.pointer_owner.step(OwnershipEvent::Wheel(InputSource::Native)).is_empty() { return; }
         let scale = self.live_scale().unwrap_or(1.0);
-        host_events::wheel(app.rt_mut(), delta, host_events::gesture_phase(phase), scale, self.mods);
+        host_events::wheel_timed(app.rt_mut(), delta, host_events::gesture_phase(phase), time, scale, self.mods);
         self.dirty = true;
     }
 

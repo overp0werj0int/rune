@@ -113,7 +113,7 @@ fn window_events_classify_every_live_user_input_kind() {
         ("mouse input", WindowEvent::MouseInput { device_id: device, state: ElementState::Pressed, button: MouseButton::Left }),
         ("cursor moved", WindowEvent::CursorMoved { device_id: device, position: PhysicalPosition::new(5.0, 5.0) }),
         ("cursor left", WindowEvent::CursorLeft { device_id: device }),
-        ("mouse wheel", WindowEvent::MouseWheel { device_id: device, delta: MouseScrollDelta::LineDelta(0.0, 1.0), phase: WinitTouchPhase::Moved }),
+        ("mouse wheel", WindowEvent::MouseWheel { device_id: device, delta: MouseScrollDelta::LineDelta(0.0, 1.0), phase: WinitTouchPhase::Moved, time: None }),
         ("pinch gesture", WindowEvent::PinchGesture { device_id: device, delta: 0.1, phase: WinitTouchPhase::Moved }),
         ("rotation gesture", WindowEvent::RotationGesture { device_id: device, delta: 1.0, phase: WinitTouchPhase::Moved }),
         ("double tap gesture", WindowEvent::DoubleTapGesture { device_id: device }),

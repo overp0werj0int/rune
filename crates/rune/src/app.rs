@@ -593,6 +593,13 @@ impl<S: 'static> App<S> {
         self
     }
 
+    /// Called when a trackpad's fingers land (Wayland's hold gesture), as Rune stops its own
+    /// flings: an app that runs a fling of its own stops it here.
+    pub fn on_touchpad_hold(mut self, f: fn(&mut S)) -> Self {
+        self.runtime.on_touchpad_hold = Some(f);
+        self
+    }
+
     /// Hears the modifier keys held down (Shift, Control, Alt or Option, the logo key) each time
     /// they change, wherever focus is and whether or not anything takes the key, as a web page's
     /// window-level `keydown`/`keyup` for `Alt` hear it; and none held once the window loses

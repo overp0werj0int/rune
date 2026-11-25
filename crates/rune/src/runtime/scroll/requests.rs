@@ -32,6 +32,8 @@ pub(crate) struct ScrollTables {
     pub(in crate::runtime) requests: Requests,
     /// The axis the current wheel or trackpad gesture scrolls (`runtime/scroll/x.rs`).
     pub(super) wheel_lock: scroll_x::WheelLock,
+    /// A trackpad swipe's release, its fling and the boost (`runtime/input/throw.rs`).
+    pub(in crate::runtime) throw: super::super::input::throw::Throw,
     /// Whole notches of a mouse wheel ease where the platform's browsers do (`Runtime::set_wheel_glide`).
     wheel_glide: bool,
 }
@@ -48,6 +50,7 @@ impl ScrollTables {
             scrolls: HashMap::default(),
             requests: Default::default(),
             wheel_lock: Default::default(),
+            throw: Default::default(),
             wheel_glide: true,
         }
     }

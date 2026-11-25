@@ -94,6 +94,7 @@ fn production_mode(mode: ScrollMode) -> DevMode {
         ScrollMode::Rest(_) => DevMode::Rest,
         ScrollMode::Pinned(_) => DevMode::Pinned,
         ScrollMode::Momentum { v, .. } => DevMode::Momentum(v),
+        ScrollMode::Fling { fling, .. } => DevMode::Momentum(fling.velocity() as f32),
         ScrollMode::Glide { v, .. } => DevMode::Glide(v),
         ScrollMode::Wheel { .. } => unreachable!("no act starts a wheel's ease"),
     }

@@ -218,7 +218,7 @@ impl RuntimeCore {
         match st.mode {
             ScrollMode::Glide { to: GlideTo::ShrunkEnd(_), .. } if held || st.shrink_cut() || end >= st.offset => st.mode = st.mode.to_rest(),
             ScrollMode::Glide { v, to: GlideTo::ShrunkEnd(_), .. } => st.mode = st.mode.to_glide(v, GlideTo::ShrunkEnd(end)),
-            ScrollMode::Rest(_) | ScrollMode::Momentum { .. } if moving && !(held || st.shrink_cut() || st.offset > overflow || st.offset - end <= 0.5) => {
+            ScrollMode::Rest(_) | ScrollMode::Momentum { .. } | ScrollMode::Fling { .. } if moving && !(held || st.shrink_cut() || st.offset > overflow || st.offset - end <= 0.5) => {
                 st.mode = st.mode.to_glide(0.0, GlideTo::ShrunkEnd(end));
                 st.spring = None;
             }

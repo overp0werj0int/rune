@@ -371,19 +371,23 @@ pub(crate) fn keyboard(
 /// Translates a host-neutral wheel input (window points) into runtime pinch-wheel, `WheelEvent`,
 /// or pointer-less phase begin/end notifications, scaled into view points.
 pub(crate) fn wheel_core(rt: &mut RuntimeCore, input: WheelInput) -> WheelOutcome {
+    wheel_core_timed(rt, input, None)
+}
+
+/// [`wheel_core`] carrying the platform's own input timestamp (`WheelEvent::time`), when given.
+pub(crate) fn wheel_core_timed(rt: &mut RuntimeCore, input: WheelInput, time: Option<f64>) -> WheelOutcome {
     match rt.pointer() {
         // Off macOS a trackpad pinch is a Ctrl + wheel.
         Some((x, y)) if input.pinch && input.mods.ctrl && rt.pinch_wheel(x, y, input.dy, input.ticks) => WheelOutcome::Pinched,
         Some((x, y)) => {
             let zoom = rt.zoom();
-            rt.wheel_event(
-                crate::WheelEvent::new(input.dx / zoom, input.dy / zoom)
-                    .at(x, y)
-                    .mods(input.mods)
-                    .phase(input.phase)
-                    .precise(input.precise)
-                    .notch(input.notch),
-            );
+            let ev = crate::WheelEvent::new(input.dx / zoom, input.dy / zoom)
+                .at(x, y)
+                .mods(input.mods)
+                .phase(input.phase)
+                .precise(input.precise)
+                .notch(input.notch);
+            rt.wheel_event(match time { Some(t) => ev.time(t), None => ev });
             WheelOutcome::Scrolled
         }
         None if input.phase == crate::GesturePhase::Began => {
@@ -474,6 +478,18 @@ pub(crate) fn wheel_from_delta(
     scale: f32,
     mods: crate::Mods,
 ) -> WheelOutcome {
+    wheel_from_delta_timed(rt, delta, phase, None, scale, mods)
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn wheel_from_delta_timed(
+    rt: &mut RuntimeCore,
+    delta: MouseScrollDelta,
+    phase: crate::GesturePhase,
+    time: Option<f64>,
+    scale: f32,
+    mods: crate::Mods,
+) -> WheelOutcome {
     let shift = crate::runtime::SHIFT_TURNS_WHEEL && mods.shift && !mods.ctrl;
     // In window points: a wheel turns as far on screen at any zoom, as Chromium's does,
     // and a pinch is the same gesture whatever the zoom.
@@ -492,7 +508,7 @@ pub(crate) fn wheel_from_delta(
         cfg!(target_os = "macos"),
         cfg!(any(target_os = "windows", target_os = "linux")),
     );
-    wheel_core(
+    wheel_core_timed(
         rt,
         WheelInput {
             dx,
@@ -507,12 +523,13 @@ pub(crate) fn wheel_from_delta(
             // apart); a real pinch still arrives as its own gesture.
             pinch: true,
         },
+        time,
     )
 }
 
 /// Translates a winit `MouseWheel` event into runtime pinch-wheel, `WheelEvent`, or
 /// pointer-less phase begin/end notifications, scaled into view points.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn wheel(
     rt: &mut RuntimeCore,
     delta: MouseScrollDelta,
@@ -520,7 +537,20 @@ pub(crate) fn wheel(
     scale: f32,
     mods: ModifiersState,
 ) {
-    let _ = wheel_from_delta(rt, delta, phase, scale, map_mods(mods));
+    let _ = wheel_from_delta_timed(rt, delta, phase, None, scale, map_mods(mods));
+}
+
+/// [`wheel`] carrying the platform's own input timestamp (`WindowEvent::MouseWheel::time`).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn wheel_timed(
+    rt: &mut RuntimeCore,
+    delta: MouseScrollDelta,
+    phase: crate::GesturePhase,
+    time: Option<f64>,
+    scale: f32,
+    mods: ModifiersState,
+) {
+    let _ = wheel_from_delta_timed(rt, delta, phase, time, scale, map_mods(mods));
 }
 
 /// Translates a winit `PinchGesture` at the current pointer; returns true when delivered.

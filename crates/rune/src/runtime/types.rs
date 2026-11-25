@@ -499,6 +499,8 @@ pub(super) enum XMotion {
     Glide { v: f32, aim: f64 },
     /// Easing to where a notched mouse wheel sent it (`runtime/scroll/wheel.rs`).
     Wheel(scroll_wheel::WheelCurve),
+    /// Coasting on a trackpad fling's curve (`runtime/scroll/fling.rs`).
+    Fling(scroll_fling::Fling),
 }
 
 /// A scroll viewport's horizontal offset, motion and limit (points).
@@ -525,9 +527,13 @@ impl AxisScroll {
         match self.flow { crate::el::Flow::Ltr => -delta, crate::el::Flow::Rtl => delta }
     }
 
-    /// Its momentum (points a second), 0 unless coasting.
+    /// Its momentum or fling speed (points a second), 0 unless coasting.
     pub(super) fn coast(&self) -> f32 {
-        match self.motion { XMotion::Momentum(v) => v, _ => 0.0 }
+        match self.motion {
+            XMotion::Momentum(v) => v,
+            XMotion::Fling(f) => f.velocity() as f32,
+            _ => 0.0,
+        }
     }
 
     /// A glide or a wheel's ease moves it on its own.
@@ -537,7 +543,7 @@ impl AxisScroll {
 
     /// Coasting at `v` from here; at 0 a coast stops, and a glide or a wheel's ease runs on.
     pub(super) fn set_coast(&mut self, v: f32) {
-        if v != 0.0 { self.motion = XMotion::Momentum(v); } else if matches!(self.motion, XMotion::Momentum(_)) { self.motion = XMotion::Rest; }
+        if v != 0.0 { self.motion = XMotion::Momentum(v); } else if matches!(self.motion, XMotion::Momentum(_) | XMotion::Fling(_)) { self.motion = XMotion::Rest; }
     }
 }
 

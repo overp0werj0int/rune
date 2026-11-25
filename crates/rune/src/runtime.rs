@@ -170,9 +170,9 @@ pub use scroll::watch::scroll_watch_state;
 pub(crate) use scroll::x::LINE_POINTS;
 pub(crate) use scroll::x::{SHIFT_TURNS_WHEEL, wheel_delta};
 use scroll::{
-    bottom as scroll_bottom, edge as scroll_edge, mode as scroll_mode, nudge as scroll_nudge,
-    offset as scroll_offset, requests, sticky, touch as scroll_touch, watch as scroll_watch,
-    wheel as scroll_wheel, x as scroll_x,
+    bottom as scroll_bottom, edge as scroll_edge, fling as scroll_fling, mode as scroll_mode,
+    nudge as scroll_nudge, offset as scroll_offset, requests, sticky, touch as scroll_touch,
+    watch as scroll_watch, wheel as scroll_wheel, x as scroll_x,
 };
 use scroll::drawn::PixelHold;
 use scroll::mode::ScrollMode;
