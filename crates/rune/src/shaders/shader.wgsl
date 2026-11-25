@@ -156,21 +156,37 @@ fn shadow(p: vec2<f32>, half: vec2<f32>, sigma: f32, radii: vec4<f32>) -> f32 {
 
 // Coverage of a stroke segment from a to b, `hw` half width, round or butt caps. Strokes
 // thinner than a pixel draw a pixel wide at proportionally lower coverage.
-fn segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, hw: f32, round: bool) -> f32 {
-    let w = max(hw, 0.5);
-    let weight = min(hw * 2.0, 1.0);
+// Whether a polyline's segment a->b shades p: past a joint it gives way to its neighbour, on the
+// joint's bisector plane (`cuts`: the normals at a and at b, zero where nothing joins), so each
+// pixel of a joint is shaded once. The neighbour computes the same plane, and ties go to it.
+fn joined(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, cuts: vec4<f32>) -> bool {
+    if (dot(cuts.xy, cuts.xy) > 0.0 && dot(p - a, cuts.xy) < 0.0) {
+        return false;
+    }
+    return !(dot(cuts.zw, cuts.zw) > 0.0 && dot(p - b, cuts.zw) >= 0.0);
+}
+
+// `caps`: 1 rounds the end at `a`, 2 the end at `b`; a joined end is round, its joint's plane
+// (`joined`) bounding it.
+fn segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, hw0: f32, hw1: f32, caps: f32) -> f32 {
     let ab = b - a;
     let len = length(ab);
     let ap = p - a;
+    var hw = hw0;
     var d: f32;
     if (len < 1e-4) {
-        if (!round) {
+        if (caps < 0.5) {
             return 0.0;
         }
-        d = length(ap) - w;
+        d = length(ap) - max(hw, 0.5);
     } else {
         let dir = ab / len;
         let along = dot(ap, dir);
+        // A tapered stroke widens from `hw0` at `a` to `hw1` at `b`.
+        hw = mix(hw0, hw1, clamp(along / len, 0.0, 1.0));
+        let w = max(hw, 0.5);
+        let c = u32(caps + 0.5);
+        let round = select((c & 2u) != 0u, (c & 1u) != 0u, along < len * 0.5);
         if (round) {
             d = length(ap - dir * clamp(along, 0.0, len)) - w;
         } else {
@@ -179,7 +195,7 @@ fn segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, hw: f32, round: bool) -> f3
             d = min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0)));
         }
     }
-    return clamp(0.5 - d, 0.0, 1.0) * weight;
+    return clamp(0.5 - d, 0.0, 1.0) * min(hw * 2.0, 1.0);
 }
 
 // Signed distance from p to the edge a->b, positive on the side `c` lies on.
@@ -585,7 +601,7 @@ fn fs(i: Out) -> @location(0) vec4<f32> {
             }
         }
     } else if (kind > 4.5 && kind < 5.5) {
-        col = i.fill * segment(screen, i.radii.xy, i.radii.zw, i.params.x, i.params.z > 0.5);
+        col = i.fill * select(0.0, segment(screen, i.radii.xy, i.radii.zw, i.params.x, select(i.params.x, i.border.x, i.border.x > 0.0), i.params.z), joined(screen, i.radii.xy, i.radii.zw, i.uv));
     } else if (kind > 5.5 && kind < 6.5) {
         col = i.fill * triangle(screen, i.radii.xy, i.radii.zw, i.uv.xy, u32(i.params.x + 0.5));
     } else if (kind > 2.5) {

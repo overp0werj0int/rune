@@ -380,7 +380,7 @@ pub(super) fn svg(shape: &crate::Shape, size: (f32, f32)) -> String {
                     write!(out, "<path fill=\"{}\"{attr} d=\"{d}\"/>", color(c)).ok();
                 }
             }
-            crate::shape::Op::Stroke { points: pts, closed, width, cap, color: c } => {
+            crate::shape::Op::Stroke { points: pts, closed, width, cap, color: c, .. } => {
                 flush(&mut out, &mut fill);
                 let el = if *closed { "polygon" } else { "polyline" };
                 let cap = if *cap == crate::shape::LineCap::Round { "round" } else { "butt" };

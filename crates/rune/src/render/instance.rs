@@ -208,7 +208,9 @@ pub const KIND_INSET: f32 = Kind::Inset.as_f32();
 /// With a border width in `params.x` it is a `KIND_RECT` whose ring runs from `border` to `uv`,
 /// over the fill, with the same `params.w`.
 pub const KIND_GRADIENT: f32 = Kind::Gradient.as_f32();
-/// A stroke segment: `radii` = x0, y0, x1, y1; `params.x` half width, `params.z` 1 for round caps.
+/// A stroke segment: `radii` = x0, y0, x1, y1; `params.x` half width at x0, y0 and `border.x`
+/// at x1, y1 where it differs (0: the same); `params.z` 1 rounds the first end, 2 the second, 3
+/// both; `uv` the planes of its joints (`joined` in shader.wgsl), zero where there is none.
 pub const KIND_SEGMENT: f32 = Kind::Segment.as_f32();
 /// A filled triangle: `radii` = ax, ay, bx, by; `uv.xy` = cx, cy; `params.x` the antialiased-edge
 /// mask (a→b, b→c, c→a as bits 0, 1, 2; other edges are hard so neighbours meet without seams).

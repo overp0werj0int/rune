@@ -298,21 +298,31 @@ pub(super) fn shadow_cov(i: &Instance, row: &ShadowRow, px: f32, mut cov: f32) -
     scale4(i.fill, cov)
 }
 
-/// `segment`.
-fn segment(p: [f32; 2], a: [f32; 2], b: [f32; 2], hw: f32, round: bool) -> f32 {
-    let w = hw.max(0.5);
-    let weight = (hw * 2.0).min(1.0);
+/// `shader.wgsl`'s `joined`: whether segment a->b shades `p`, given its joints' planes.
+fn joined(p: [f32; 2], a: [f32; 2], b: [f32; 2], cuts: [f32; 4]) -> bool {
+    let side = |o: [f32; 2], n: [f32; 2]| (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1];
+    let has = |n: [f32; 2]| n[0] * n[0] + n[1] * n[1] > 0.0;
+    let (na, nb) = ([cuts[0], cuts[1]], [cuts[2], cuts[3]]);
+    !(has(na) && side(a, na) < 0.0) && !(has(nb) && side(b, nb) >= 0.0)
+}
+
+/// `shader.wgsl`'s `segment`.
+fn segment(p: [f32; 2], a: [f32; 2], b: [f32; 2], hw0: f32, hw1: f32, caps: f32) -> f32 {
     let ab = [b[0] - a[0], b[1] - a[1]];
     let len = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
     if !len.is_finite() { return 0.0; }
     let ap = [p[0] - a[0], p[1] - a[1]];
+    let mut hw = hw0;
     let d = if len < shader_consts::SEGMENT_MIN_LEN {
-        if !round { return 0.0; }
-        (ap[0] * ap[0] + ap[1] * ap[1]).sqrt() - w
+        if caps < 0.5 { return 0.0; }
+        (ap[0] * ap[0] + ap[1] * ap[1]).sqrt() - hw.max(0.5)
     } else {
         let dir = [ab[0] / len, ab[1] / len];
         let along = ap[0] * dir[0] + ap[1] * dir[1];
-        if round {
+        hw = hw0 + (hw1 - hw0) * (along / len).clamp(0.0, 1.0);
+        let w = hw.max(0.5);
+        let c = (caps + 0.5) as u32;
+        if if along < len * 0.5 { c & 1 != 0 } else { c & 2 != 0 } {
             let t = along.clamp(0.0, len);
             let (dx, dy) = (ap[0] - dir[0] * t, ap[1] - dir[1] * t);
             (dx * dx + dy * dy).sqrt() - w
@@ -323,7 +333,7 @@ fn segment(p: [f32; 2], a: [f32; 2], b: [f32; 2], hw: f32, round: bool) -> f32 {
             q[0].max(q[1]).min(0.0) + (mx * mx + my * my).sqrt()
         }
     };
-    clamp01(0.5 - d) * weight
+    clamp01(0.5 - d) * (hw * 2.0).min(1.0)
 }
 
 fn edge(p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
@@ -504,7 +514,10 @@ pub(super) fn boxes(i: &Instance, kind: Kind, p: [f32; 2]) -> [f32; 4] {
                 scale4(mix4(i.fill, i.uv, t), clamp01(0.5 - d / (soft * 2.0)))
             }
         }
-        Kind::Segment => scale4(i.fill, segment(p, [i.radii[0], i.radii[1]], [i.radii[2], i.radii[3]], i.params[0], i.params[2] > shader_consts::FLAG_ON_THRESHOLD)),
+        Kind::Segment => {
+            let (a, b) = ([i.radii[0], i.radii[1]], [i.radii[2], i.radii[3]]);
+            scale4(i.fill, if joined(p, a, b, i.uv) { segment(p, a, b, i.params[0], if i.border[0] > 0.0 { i.border[0] } else { i.params[0] }, i.params[2]) } else { 0.0 })
+        }
         Kind::Triangle => scale4(i.fill, triangle(p, [i.radii[0], i.radii[1]], [i.radii[2], i.radii[3]], [i.uv[0], i.uv[1]], (i.params[0] + 0.5) as u32)),
         Kind::Dashed => {
             let d = sd_rounded(q, half, i.radii);

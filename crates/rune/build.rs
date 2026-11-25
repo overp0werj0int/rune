@@ -506,7 +506,7 @@ fn parse_shader_consts(src: &WgslSources<'_>) -> ParsedShaderConsts {
     let kind_dashed = unique_kind_in(shader_path, "KIND_DASHED", dashed_lo, radial_lo);
     let kind_layer_end = unique_kind_in(shader_path, "KIND_LAYER_END", f32::from(kind_layer) + 0.5, dashed_lo);
     assert_eq!(flat_span_hi, f32::from(kind_layer_end) + 0.5, "{shader_path}: base_vs flat span upper bound does not match KIND_LAYER_END");
-    let seg_caps = capture_once(shader_path, "fs segment branch", &fs, "else if (kind > {} && kind < {}) { col = i.fill * segment(");
+    let seg_caps = capture_once(shader_path, "fs segment branch", &fs, "else if (kind > {} && kind < {}) { col = i.fill * select(0.0, segment(");
     let kind_segment = kind_between(
         shader_path,
         "KIND_SEGMENT",
@@ -540,9 +540,8 @@ fn parse_shader_consts(src: &WgslSources<'_>) -> ParsedShaderConsts {
     let (_, radial_open_off_lit) = parse_f32(shader_path, "RADIAL_OPEN_OFFSET", radial_open[2]);
     let (_, radial_stop_eps_lit) = parse_f32(shader_path, "RADIAL_STOP_EPSILON", capture_once(shader_path, "radial stop epsilon", &fs, "t1 <= t0 + {})")[0]);
     let (_, inset_sharp_lit) = parse_f32(shader_path, "INSET_SHARP_SIGMA", capture_once(shader_path, "inset sharp sigma", &fs, "if (i.params.z < {}) { lit = box_cov")[0]);
-    let (flag_on, flag_on_lit) = parse_f32(shader_path, "FLAG_ON_THRESHOLD", capture_once(shader_path, "segment round-cap flag", &fs, "segment(screen, i.radii.xy, i.radii.zw, i.params.x, i.params.z > {})")[0]);
     let img_texel = wgsl_block(shader_path, &shader_code, "fn", "image_texel");
-    assert_eq!(parse_f32(shader_path, "g.flags.x", capture_once(shader_path, "g.flags.x", &img_texel, "if (g.flags.x > {})")[0]).0, flag_on);
+    let (flag_on, flag_on_lit) = parse_f32(shader_path, "FLAG_ON_THRESHOLD", capture_once(shader_path, "g.flags.x", &img_texel, "if (g.flags.x > {})")[0]);
     assert_eq!(parse_f32(shader_path, "g.flags.y", capture_once(shader_path, "g.flags.y", &fs, "if (g.flags.y > {} &&")[0]).0, flag_on);
     let image_flag_premul = parse_u32(
         shader_path,

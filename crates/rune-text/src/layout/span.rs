@@ -22,6 +22,8 @@ pub struct Span {
     pub underline: Option<Color>,
     /// The family's italic face, or a synthetic oblique when it has none.
     pub italic: bool,
+    /// Raised as a superscript (CSS `vertical-align: super`), without growing its line.
+    pub sup: bool,
 }
 
 impl Span {
@@ -42,6 +44,12 @@ impl Span {
 
     pub fn italic(mut self) -> Span {
         self.italic = true;
+        self
+    }
+
+    /// Raised as a superscript; pair it with a smaller [`Self::size`].
+    pub fn sup(mut self) -> Span {
+        self.sup = true;
         self
     }
 
@@ -67,6 +75,7 @@ impl Span {
             || self.mono
             || self.size.is_some()
             || self.italic
+            || self.sup
             || self.bg.is_some()
             || self.underline.is_some()
     }
@@ -81,6 +90,7 @@ impl Span {
             self.weight.map(f32::to_bits),
             self.size.map(f32::to_bits),
             self.italic,
+            self.sup,
             self.bg.is_some(),
             self.bg.map(|_| self.bg_pad.to_bits()),
             self.underline.is_some(),

@@ -450,6 +450,11 @@ impl TextSystem {
                 if let Some(v) = span_spacing[i] {
                     b.push(StyleProperty::LetterSpacing(v), r.clone());
                 }
+                if s.sup {
+                    // `sup { line-height: 0 }`: raised glyphs leave the line's leading alone.
+                    b.push(StyleProperty::VerticalAlign(parley::VerticalAlign::SUPER), r.clone());
+                    b.push(LineHeight::Absolute(0.0), r.clone());
+                }
             }
             for (range, w) in weights {
                 b.push(StyleProperty::FontWeight(FontWeight::new(*w)), range.clone());

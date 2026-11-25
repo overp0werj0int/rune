@@ -5,10 +5,11 @@
 //! Shapes render in the uber-quad pass without the glyph atlas: a stroke is one capsule or box
 //! per segment (`KIND_SEGMENT`), a fill is triangulated into triangles (`KIND_TRIANGLE`) whose
 //! true contour-boundary edges are antialiased and whose interior and bridge edges are hard, so
-//! fills have no seams even when translucent. Translucent strokes blend twice where neighbouring
-//! segments overlap at a joint; draw translucent areas as fills. An element's opacity doesn't:
-//! while it is between 0 and 1, a shape of more than one piece paints through a layer that takes
-//! it once.
+//! fills have no seams even when translucent. Neighbouring segments, and a stroke that starts
+//! where the one before it ended, meet on their joint's bisector, each shading its own side, so a
+//! joint is shaded once, translucent or not; a turn of 90 degrees or more overlaps instead. While
+//! an element's opacity is between 0 and 1, a shape of more than one piece paints through a layer
+//! that takes it once.
 
 mod area;
 mod planar;
@@ -63,6 +64,9 @@ pub enum Op {
         points: Vec<[f32; 2]>,
         closed: bool,
         width: f32,
+        /// [`Shape::taper`]: the width at the last point, the stroke widening along its length
+        /// from `width` at the first.
+        end_width: Option<f32>,
         cap: LineCap,
         color: Color,
     },
@@ -129,9 +133,21 @@ impl Shape {
                 points,
                 closed,
                 width,
+                end_width: None,
                 cap,
                 color,
             });
+        }
+        self
+    }
+
+    /// An open polyline through `points` whose width goes from `width` at the first point to
+    /// `end_width` at the last, evenly along its length, with no step anywhere. A curve drawn
+    /// as tapers that each start where the last ended, at its width, reads as one stroke.
+    pub fn taper(mut self, points: impl Into<Vec<[f32; 2]>>, width: f32, end_width: f32, cap: LineCap, color: Color) -> Shape {
+        let points = points.into();
+        if points.len() >= 2 && (width > 0.0 || end_width > 0.0) {
+            self.ops.push(Op::Stroke { points, closed: false, width, end_width: Some(end_width), cap, color });
         }
         self
     }
@@ -314,7 +330,7 @@ impl Shape {
         let mut ops = Vec::new();
         for op in &self.ops {
             match op {
-                Op::Stroke { points, closed, width, cap, color } => {
+                Op::Stroke { points, closed, width, end_width, cap, color } => {
                     let l = len(points, *closed);
                     let (lo, hi) = (from.max(done), at.min(done + l));
                     if lo <= done && hi >= done + l {
@@ -326,7 +342,10 @@ impl Shape {
                         }
                         let cut = slice(&ring, lo - done, hi - done);
                         if cut.len() >= 2 {
-                            ops.push(Op::Stroke { points: cut, closed: false, width: *width, cap: *cap, color: *color });
+                            // A taper keeps its widths where it is cut.
+                            let at = |v: f32| end_width.map_or(*width, |e| width + (e - width) * (v / l.max(1e-6)).clamp(0.0, 1.0));
+                            let (width, end_width) = (at(lo - done), end_width.map(|_| at(hi - done)));
+                            ops.push(Op::Stroke { points: cut, closed: false, width, end_width, cap: *cap, color: *color });
                         }
                     }
                     done += l;

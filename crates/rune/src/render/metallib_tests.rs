@@ -411,7 +411,7 @@ fn metallib_and_wgsl_render_identical_pixels() {
                     rect: [56.0, 48.0, 48.0, 30.0],
                     radii: [60.0, 52.0, 100.0, 74.0],
                     fill: [0.95, 0.6, 0.2, 1.0],
-                    params: [2.5, KIND_SEGMENT, 1.0, 0.0],
+                    params: [2.5, KIND_SEGMENT, 3.0, 0.0],
                     clip: NO_CLIP,
                     ..Instance::zeroed()
                 },
