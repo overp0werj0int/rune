@@ -27,6 +27,7 @@ mod effect_slot;
 mod enter_delay;
 mod env_compat;
 mod expressive_motion;
+mod field_kept_layout;
 mod field_menu_key_caret;
 mod fly_text_extent;
 mod fly_text_scoped;

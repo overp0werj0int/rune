@@ -1088,7 +1088,7 @@ impl Host {
     fn give_back(&mut self, all: bool) {
         {
             let rt = self.app.rt_mut();
-            rt.text.rest();
+            rt.text.rest(all);
             rt.images.rest();
             if let Some(rewind) = rt.motion.rewind() { rewind.rest(); }
         }

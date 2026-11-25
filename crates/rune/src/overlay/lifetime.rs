@@ -307,7 +307,7 @@ impl OverlayCore {
     fn give_back(&mut self, app: &mut dyn OverlayApp, all: bool, now: Instant) {
         {
             let rt = app.rt_mut();
-            rt.text.rest();
+            rt.text.rest(all);
             rt.images.rest();
             if let Some(rewind) = rt.motion.rewind() { rewind.rest(); }
         }

@@ -426,7 +426,7 @@ fn detached_metal_layer_retires_presented_drawables_on_idle_poll_and_bounds_resi
         assert!(crate::window::rest::should_poll_on_idle_rest(true, false));
         let status = device.poll(wgpu::PollType::Poll).expect("non-blocking Metal poll");
         assert_eq!(status, wgpu::PollStatus::QueueEmpty, "idle poll retires all completed Metal command buffers and drawables");
-        rt.text.rest();
+        rt.text.rest(false);
         rt.images.rest();
         renderer.give_back(false, &mut rt.text.atlas.resident_caches, &rt.images);
         assert_eq!(renderer.spare_layers(), 0);

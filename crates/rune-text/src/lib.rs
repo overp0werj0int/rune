@@ -5,9 +5,10 @@
 //!
 //! Invariants: layouts are in device pixels; every layout is cached by a 64-bit hash of
 //! (text, spans, style, scale, width), kept for two commits unused and then while a budget of
-//! stale layouts lasts (`STALE_BYTES`), least recently used out first; a width not cached re-breaks
-//! a cached layout of the same text and style rather than shaping it again; glyph keys include
-//! the run's variation coordinates, so one variable font serves every weight.
+//! stale layouts lasts (`STALE_BYTES`), least recently used out first, but of the by-paragraph
+//! fields past the budget the one used last keeps its layouts (`evict_fields`); a width not
+//! cached re-breaks a cached layout of the same text and style rather than shaping it again;
+//! glyph keys include the run's variation coordinates, so one variable font serves every weight.
 
 use std::collections::HashMap;
 use std::hash::Hash;

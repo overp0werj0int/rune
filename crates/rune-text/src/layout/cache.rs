@@ -70,10 +70,15 @@ fn evict<T>(cache: &mut Cache<T>, g: u32) {
 
 /// [`evict`] to `budget` bytes of stale layouts.
 fn evict_to<T>(cache: &mut Cache<T>, g: u32, budget: usize) {
+    drop(evicted(cache, g, budget));
+}
+
+/// What [`evict_to`] drops, taken out of `cache`.
+fn evicted<T>(cache: &mut Cache<T>, g: u32, budget: usize) -> Vec<(u64, Entry<T>)> {
     let stale = |used: u32| g.wrapping_sub(used) >= 2;
     let total: usize = cache.values().filter(|e| stale(e.used)).map(|e| e.cost as usize).sum();
     if total <= budget {
-        return;
+        return Vec::new();
     }
     let mut ages: Vec<(u32, usize)> = cache.values().filter(|e| stale(e.used)).map(|e| (g.wrapping_sub(e.used), e.cost as usize)).collect();
     ages.sort_unstable_by_key(|a| a.0);
@@ -87,10 +92,20 @@ fn evict_to<T>(cache: &mut Cache<T>, g: u32, budget: usize) {
         }
     }
     let mut room = budget - younger;
-    cache.retain(|_, e| {
+    cache.extract_if(|_, e| {
         let (age, cost) = (g.wrapping_sub(e.used), e.cost as usize);
-        age < cutoff || age == cutoff && cost <= room && { room -= cost; true }
-    });
+        !(age < cutoff || age == cutoff && cost <= room && { room -= cost; true })
+    }).collect()
+}
+
+/// [`evict_to`] for by-paragraph fields' layouts, except that of the texts it would drop, the one
+/// used last keeps its layouts at every width, whatever their size: a long field shown again after
+/// another screen (a note's editor after its preview) finds its paragraphs laid out rather than
+/// shaping them all again. One text is kept so, until another that doesn't fit goes stale after it.
+fn evict_fields(cache: &mut Cache<Rc<crate::ParagraphLayout>>, g: u32, budget: usize) {
+    let mut gone = evicted(cache, g, budget);
+    let Some(last) = gone.iter().min_by_key(|(_, e)| g.wrapping_sub(e.used)).map(|(_, e)| e.shape) else { return };
+    cache.extend(gone.extract_if(.., |(_, e)| e.shape == last));
 }
 
 impl TextSystem {
@@ -122,7 +137,7 @@ impl TextSystem {
             self.superseded.clear();
         }
         evict(&mut self.layouts, g);
-        evict(&mut self.paragraphs, g);
+        evict_fields(&mut self.paragraphs, g, STALE_BYTES);
         self.last_paragraphs = None;
         self.last_diff = None;
         self.line_scan = None;
@@ -134,14 +149,15 @@ impl TextSystem {
     }
 
     /// A window at rest (`window::rest`): drops every layout the last two commits didn't use,
-    /// and the glyph runs drawn from them. A view shown again after it shapes afresh, as one
-    /// shown for the first time does.
+    /// and the glyph runs drawn from them, but while the window still shows (`all` false) the
+    /// field shown last keeps its own. A view shown again after it shapes afresh, as one shown
+    /// for the first time does.
     #[doc(hidden)]
-    pub fn rest(&mut self) {
+    pub fn rest(&mut self, all: bool) {
         // `end_commit` moved the generation on after the last commit.
         let g = self.generation.wrapping_sub(1);
         evict_to(&mut self.layouts, g, 0);
-        evict_to(&mut self.paragraphs, g, 0);
+        if all { evict_to(&mut self.paragraphs, g, 0) } else { evict_fields(&mut self.paragraphs, g, 0) }
         evict_to(&mut self.elisions, g, 0);
         evict_to(&mut self.runs, g, 0);
         let layouts = &self.layouts;
