@@ -273,6 +273,10 @@ impl Gpu {
     pub(crate) fn made(instance: wgpu::Instance, adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue,
         draws_surfaces: bool) -> Gpu {
         let callbacks = GpuCallbacks::new(&device, draws_surfaces);
+        if draws_surfaces && !cfg!(test) {
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::gpu::pick::warn_software(&adapter.get_info());
+        }
         let removal = rune_gpu::health::Removal::watch(&device);
         Gpu {
             instance,

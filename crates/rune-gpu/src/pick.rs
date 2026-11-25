@@ -101,6 +101,34 @@ impl Pick {
     }
 }
 
+/// Says once that a window draws on a software adapter (lavapipe) although the machine has a
+/// GPU. Quiet when `WGPU_ADAPTER_NAME` or `WGPU_POWER_PREF` chose the adapter.
+pub fn warn_software(info: &wgpu::AdapterInfo) {
+    let chosen = std::env::var_os("WGPU_ADAPTER_NAME").is_some()
+        || wgpu::PowerPreference::from_env().is_some();
+    if info.device_type != wgpu::DeviceType::Cpu || chosen || !has_gpu() {
+        return;
+    }
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "rune: warning: drawing on {:?}, a software renderer, so every frame costs the CPU, \
+             though this machine has a GPU: check `vulkaninfo --summary`",
+            info.name
+        );
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn has_gpu() -> bool {
+    std::fs::read_dir("/dev/dri").is_ok_and(|mut nodes| {
+        nodes.any(|node| node.is_ok_and(|n| n.file_name().to_string_lossy().starts_with("renderD")))
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn has_gpu() -> bool { true }
+
 /// `Pick::shows` for an adapter on PCI device `pci`.
 fn shows(compositor: Option<&str>, pci: &str) -> bool {
     compositor.is_none_or(|compositor| same_pci(compositor, pci))

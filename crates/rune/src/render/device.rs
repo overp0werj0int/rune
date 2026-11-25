@@ -488,7 +488,11 @@ impl Gpu {
                         |allow_noncompliant| {
                             wgpu::Instance::new(Self::instance_descriptor(backends, allow_noncompliant))
                         },
-                        |instance| !pollster::block_on(instance.enumerate_adapters(backends)).is_empty(),
+                        |instance| {
+                            pollster::block_on(instance.enumerate_adapters(backends))
+                                .iter()
+                                .any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+                        },
                     )
                 },
             )
@@ -527,9 +531,10 @@ impl Gpu {
     }
 
     /// Builds a conformant-only instance first and returns it whenever it sees at least one
-    /// adapter, so machines with a conformant adapter never expose non-conformant drivers. Only
-    /// when the conformant instance finds no adapters at all does it retry with
-    /// `ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER` (Apple silicon Linux Asahi/Aurora Honeykrisp).
+    /// hardware adapter, so machines with a conformant GPU never expose non-conformant drivers.
+    /// When the conformant instance finds only software adapters (such as lavapipe) or none at
+    /// all, it retries with `ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER` (Apple silicon Linux
+    /// Asahi/Borealis/Honeykrisp).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     fn select_wgpu_instance<I>(
         mut build: impl FnMut(bool) -> I,

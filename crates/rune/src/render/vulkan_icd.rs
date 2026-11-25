@@ -591,11 +591,17 @@ pub(crate) fn create_linux_instance(
                 if !direct_vulkan::has_vulkan_hal(&compliant) {
                     return compliant;
                 }
-                if !pollster::block_on(compliant.enumerate_adapters(backends)).is_empty() {
+                if pollster::block_on(compliant.enumerate_adapters(backends))
+                    .iter()
+                    .any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+                {
                     return compliant;
                 }
                 let noncompliant = wgpu::Instance::new(make_descriptor(true));
-                if !pollster::block_on(noncompliant.enumerate_adapters(backends)).is_empty() {
+                if pollster::block_on(noncompliant.enumerate_adapters(backends))
+                    .iter()
+                    .any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+                {
                     return noncompliant;
                 }
                 compliant
