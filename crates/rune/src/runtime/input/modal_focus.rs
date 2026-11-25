@@ -161,7 +161,7 @@ impl RuntimeCore {
                 let (removed, outermost) = self.kbd.modal_removed_top(|p| self.node(p).is_none());
                 if removed > 0 {
                     let outermost = outermost.cloned();
-                    let inside = self.focused_index().is_some_and(|j| self.allowed(j));
+                    let inside = self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j));
                     let carried = outermost.as_ref().and_then(|l| l.restore.as_ref())
                         .filter(|p| self.node_index(p).is_some_and(|idx| self.can_focus_unblocked(idx)))
                         .cloned();
@@ -176,7 +176,7 @@ impl RuntimeCore {
                         Opened::Dialog
                     };
                     cb_dirty |= self.modal_step(app, ModalEvent::Replaced { removed, path, restore, opened });
-                    if !self.focused_index().is_some_and(|j| self.allowed(j)) {
+                    if !self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j)) {
                         cb_dirty |= self.modal_step(app, ModalEvent::FocusOutside);
                     }
                     return cb_dirty;
@@ -195,12 +195,12 @@ impl RuntimeCore {
         // menu handed focus back to its trigger as its pick opened this modal (`Tx::return_focus`,
         // which a web menu does only after the dialog has noted the item): closing returns to
         // what had focus before.
-        let inside = self.focused_index().is_some_and(|j| self.allowed(j));
+        let inside = self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j));
         let restore = if inside || returned { self.kbd.focus_before_commit.clone() } else { self.kbd.focus.owned() };
         let is_menu = self.is_menu_or_listbox_modal(i);
         let opened = if is_menu && !self.kbd.focus.keyboard() { Opened::PointerMenu } else { Opened::Dialog };
         cb_dirty |= self.modal_step(app, ModalEvent::Opened { path, restore, opened });
-        if !self.focused_index().is_some_and(|j| self.allowed(j)) {
+        if !self.focused_index().is_some_and(|j| self.allowed(j) && self.modal_member(j)) {
             cb_dirty |= self.modal_step(app, ModalEvent::FocusOutside);
         }
         cb_dirty

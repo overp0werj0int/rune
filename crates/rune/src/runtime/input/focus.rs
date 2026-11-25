@@ -20,10 +20,12 @@ const CLAMPED_ROLES: [&str; 3] = ["list", "tree", "grid"];
 const LANDMARK_ROLES: [&str; 6] = ["banner", "navigation", "main", "complementary", "form", "search"];
 const PRESSABLE_ROLES: [&str; 9] = ["button", "link", "tab", "checkbox", "switch", "radio", "combobox", "treeitem", "gridcell"];
 /// The innermost open modal and the nodes input may reach while it shows: its subtree, the
-/// popovers anchored inside it, and the window's caption buttons.
+/// popovers anchored inside it, and the window's caption buttons. `kept`: the subtrees outside
+/// it that the pointer alone still reaches (`El::modal_keeps`).
 pub(in crate::runtime) struct ModalScope {
     index: usize,
     members: Vec<bool>,
+    kept: Vec<bool>,
 }
 
 /// Whether node `i` in `nodes` is not inert and has positive opacity along its ancestor chain.
@@ -150,7 +152,15 @@ impl ModalScope {
             }
             if !changed { break; }
         }
-        Some(Self { index, members })
+        let keeps = nodes[index].handlers.get().and_then(|h| h.modal.as_ref()).map(|m| m.keeps.clone()).unwrap_or_else(|| std::rc::Rc::new([]));
+        let mut kept = vec![false; nodes.len()];
+        if !keeps.is_empty() {
+            for (i, n) in nodes.iter().enumerate() {
+                kept[i] = !members[i] && !is_exiting(i) && !is_unmounted(i)
+                    && (n.key.as_deref().is_some_and(|k| keeps.iter().any(|w| w == k)) || n.parent.is_some_and(|p| kept[p]));
+            }
+        }
+        Some(Self { index, members, kept })
     }
 }
 
@@ -166,10 +176,18 @@ impl focus_machine::KeyboardState {
         self.modal_scope.as_ref().is_none_or(|m| m.members.get(i).copied().unwrap_or(false))
     }
 
-    /// Input may reach node `i`: it's outside any `El::inert` subtree and not behind a modal.
+    /// Node `i` is inside the open modal's scope or a subtree it keeps live to the pointer.
+    #[inline]
+    pub(in crate::runtime) fn modal_pointer_member(&self, i: usize) -> bool {
+        self.modal_scope.as_ref().is_none_or(|m| m.members.get(i).copied().unwrap_or(false) || m.kept.get(i).copied().unwrap_or(false))
+    }
+
+    /// Input may reach node `i`: it's outside any `El::inert` subtree and not behind a modal,
+    /// or in a subtree the modal keeps live to the pointer. Keyboard focus also needs
+    /// `modal_member`.
     #[inline]
     pub(in crate::runtime) fn allowed(&self, nodes: &[Node], i: usize) -> bool {
-        !nodes.get(i).is_some_and(|n| n.inert) && self.modal_member(i)
+        !nodes.get(i).is_some_and(|n| n.inert) && self.modal_pointer_member(i)
     }
 
     #[inline]
@@ -263,7 +281,7 @@ impl RuntimeCore {
         self.takes_focus(n) || n.input.as_ref().is_some_and(|s| s.access.is_some())
     }
     pub(crate) fn can_focus(&self, i: usize) -> bool {
-        self.can_take_focus_in(&self.tree.nodes, i) && self.reachable(i)
+        self.can_take_focus_in(&self.tree.nodes, i) && self.reachable(i) && self.modal_member(i)
     }
     /// Whether `i` can take focus once any modal covering it closes (same as [`Self::can_focus`]
     /// without the active modal's membership check).

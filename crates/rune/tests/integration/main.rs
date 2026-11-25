@@ -51,6 +51,7 @@ mod live_only;
 mod margin_axes;
 mod matched;
 mod matched_rotation;
+mod modal_keeps;
 mod motion_elements;
 mod motion_exports;
 mod motion_trace;
