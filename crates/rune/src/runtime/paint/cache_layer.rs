@@ -161,6 +161,11 @@ impl RuntimeCore {
             self.kbd.focus.keyboard().hash(&mut h);
             self.kbd.focus.hovered().hash(&mut h);
             self.commit.defaults.force_focus_rings.hash(&mut h);
+            self.commit.defaults.focus_glass.hash(&mut h);
+            // A sliding focus card is somewhere new each frame.
+            if self.paint.focus_slide.moving() {
+                self.t.to_bits().hash(&mut h);
+            }
             if let Some(ring) = self.commit.defaults.focus_ring {
                 let c = ring.color;
                 [ring.width, ring.offset, c.r, c.g, c.b, c.a].map(f32::to_bits).hash(&mut h);

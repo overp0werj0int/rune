@@ -34,6 +34,7 @@ impl RuntimeCore {
         self.clear_help_hits();
         self.clear_drop_hits();
         self.motion.reset_loops_active();
+        self.paint.focus_slide.begin();
         self.paint.scale_frame = None;
         self.paint.videos_active = false;
         self.paint.animated_icons = false;
@@ -774,6 +775,7 @@ impl RuntimeCore {
         self.frame.queue.observe_since(queued);
         self.update_help();
         self.paint.layer_scratch = layers;
+        self.paint.focus_slide.end(self.kbd.focus.keyboard());
         self.tree.built = true;
         self.land_unseen_entrances();
         self.tree.built_ids.clear();

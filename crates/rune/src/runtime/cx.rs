@@ -30,6 +30,8 @@ pub(crate) struct ViewDefaults {
     pub(crate) web_focus: bool,
     /// [`Cx::force_focus_rings`].
     pub(crate) force_focus_rings: bool,
+    /// [`Cx::focus_glass`].
+    pub(crate) focus_glass: bool,
     /// [`Cx::mark_texts`].
     pub(crate) marks: Rc<[super::TextMark]>,
 }
@@ -142,6 +144,7 @@ impl CxCore {
     pub(crate) fn help_look(&mut self, look: crate::HelpLook) { self.defaults.help = Some(look); }
     pub(crate) fn press_cursor(&mut self, cursor: crate::el::Cursor) { self.defaults.press_cursor = Some(cursor); }
     pub(crate) fn force_focus_rings(&mut self) { self.defaults.force_focus_rings = true; }
+    pub(crate) fn focus_glass(&mut self) { self.defaults.focus_glass = true; }
     pub(crate) fn web_focus(&mut self) { self.defaults.web_focus = true; }
     pub(crate) fn titlebar_height(&mut self, points: f32) { self.titlebar.height = Some(points.max(1.0)); }
     pub(crate) fn set_titlebar(&mut self, titlebar: crate::Titlebar) { self.titlebar.titlebar = Some(titlebar); }
@@ -537,6 +540,13 @@ impl<S> Cx<S> {
     /// move. Set it on every run of the view while the tool is on.
     #[inline(always)]
     pub fn force_focus_rings(&mut self) { self.core.force_focus_rings(); }
+    /// Every keyboard focus ring in the window draws as a glass card in the ring's colour, in
+    /// place of a stroke: the box out to the ring's outer edge takes a faint sheen that fades
+    /// down, a soft glow inside its edge and a rim at most a point wide, lit from above, over a
+    /// soft shadow around it. Each ring's width, offset and colour still set where and in which
+    /// colour. Set it on every run of the view.
+    #[inline(always)]
+    pub fn focus_glass(&mut self) { self.core.focus_glass(); }
     /// Keyboard focus as a web page has it, for a view that ports one: every pressable control
     /// (an `on_press` element whose role is button, link, tab, checkbox, switch, radio or
     /// combobox) is a Tab stop in document order and takes focus when clicked, as an HTML

@@ -44,6 +44,8 @@ pub(crate) struct PaintState {
     pub(super) icon_anim_mounts: HashMap<(NodeId, usize), f64>,
     /// Frame requested by scale settling or pixel snapping in the last paint.
     pub(super) scale_frame: Option<AnotherFrame>,
+    /// The keyboard's glass focus card, which slides from one element to the next.
+    pub(super) focus_slide: focus_glass::Slide,
     /// Per node index this frame: presented row top dy, row height override, and bottom feather mask.
     pub(in crate::runtime) row_dy: Vec<f32>,
     pub(in crate::runtime) row_h: Vec<f32>,
@@ -141,6 +143,7 @@ impl PaintState {
             icon_anim_wake: None,
             icon_anim_mounts: HashMap::default(),
             scale_frame: None,
+            focus_slide: Default::default(),
             row_dy: Vec::new(),
             row_h: Vec::new(),
             row_mask: Vec::new(),

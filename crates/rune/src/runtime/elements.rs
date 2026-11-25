@@ -50,6 +50,9 @@ pub struct ElementInfo {
     /// Presented border colour, when this element has a non-zero border width.
     pub border_color: Option<Color>,
     pub text_color: Option<Color>,
+    /// The colour of the first stroke of its shape ([`El::shape`](crate::El::shape)), if any:
+    /// what a contrast check reads for a line drawn as a shape.
+    pub stroke: Option<Color>,
     /// Resolved typography for text, rich text and text input elements.
     pub text_style: Option<ResolvedTextStyle>,
     /// Padding plus border `[left, top, right, bottom]` in window points: text draws inside it.
@@ -400,6 +403,10 @@ impl RuntimeCore {
                     border_color: (n.vis.border_width() > 0.0).then(|| self.color(n.id, P_BORDER, n.vis.border())),
                     text_color: paint_tracks::text_color(n)
                         .map(|c| paint_tracks::group_tint(n, self.color(n.id, P_TEXT, c), group_lit(&self.scene, n, self.paint.inh_scratch.get(i).map_or(0.0, |h| h.group)))),
+                    stroke: n.vis.shape.as_ref().and_then(|s| s.ops.iter().find_map(|op| match op {
+                        crate::shape::Op::Stroke { color, .. } => Some(*color),
+                        crate::shape::Op::Fill { .. } | crate::shape::Op::FillCompound { .. } | crate::shape::Op::FillArea { .. } => None,
+                    })),
                     text_style: n.text.as_deref().map(|spec| {
                         let family = if secure {
                             self.text.resolved_family(spec.style.family)
@@ -468,7 +475,7 @@ impl RuntimeCore {
                 focusable: false, focused: false, focus_visible: false, inert: true, exiting: false,
                 key: Some(path.clone()), path, role: "text", label: None, text: None,
                 rect: [r.x, r.y, r.w, r.h], target: [t.x, t.y, t.w, t.h],
-                opacity: f.source_alpha, scale: 1.0, blur: 0.0, radius: 0.0, fill: Color::TRANSPARENT, border_color: None, text_color: None, text_style: None,
+                opacity: f.source_alpha, scale: 1.0, blur: 0.0, radius: 0.0, fill: Color::TRANSPARENT, border_color: None, text_color: None, stroke: None, text_style: None,
                 inset: [0.0; 4], text_size: None, wrap: false, truncate: false, text_cut: false, clips: false, scroll_axes: [false, false], raised: false,
                 hover: 0.0, press: 0.0, moving: true, parent: None,
                 visible: [r.x.max(c[0]), r.y.max(c[1]), (r.edges()[2].min(c[2]) - r.x.max(c[0])).max(0.0),

@@ -193,6 +193,36 @@ impl RuntimeCore {
             let sh = &if k < n.vis.shadows.len() { self.shadow_at(n.id, k, sh) } else { *sh };
             shadow_paint::push_shadow(&mut self.instances, sh, c, &cast);
         }
+        let focus_ring = if default_ring == Some(i) || self.forced_default_ring(i) { Some(self.default_focus_ring()) }
+            else if let Some(key) = n.focus.ring_for.as_deref() {
+                n.focus.ring.filter(|_| self.kbd.focus.keyboard() && self.kbd.focus.path().is_some_and(|p| p.rsplit('/').next().is_some_and(|seg| element_path::segment_matches_key(seg, key))))
+            }
+            else if n.focus.within { n.focus.ring.filter(|_| self.focus_within(i) && (!n.focus.within_keyboard || self.kbd.focus.entered_by_keys())) }
+            else { self.focus_ring_visible(i).then_some(n.focus.ring).flatten() };
+        // `Cx::focus_glass`: the ring's place, as far out as the ring's outer edge, is a
+        // glass card instead. Its shadow falls around it, under the element, never inside.
+        // The keyboard's own card (not a default button's, nor a group's around it)
+        // slides to each element focus reaches.
+        let keyed = default_ring != Some(i) && !self.forced_default_ring(i) && !n.focus.within && n.focus.ring_for.is_none();
+        let glass = focus_ring.filter(|ol| self.commit.defaults.focus_glass && ol.color.a > 0.0 && ol.width > 0.0).map(|ol| {
+            let g = pixel_snap::line_width(ol.offset * s) * sc + pixel_snap::line_width(ol.width * s) * sc;
+            let rect = [r[0] - g, r[1] - g, w + 2.0 * g, h + 2.0 * g];
+            let radii = match n.focus.ring_radius {
+                Some(rr) => [rr * s * sc; 4],
+                None => radii.map(|v| if v != 0.0 { (v + g).max(0.0) } else { 0.0 }),
+            };
+            let mut gl = focus_glass::Glass { rect, radii, tint: ol.color, rim: ol.width.min(1.0) };
+            if keyed {
+                let moving = self.paint.focus_slide.place(&mut gl, n.id, clip, now, self.reduced_motion);
+                self.motion.mark_loops_active(moving);
+            }
+            gl
+        });
+        if let Some(gl) = &glass {
+            let cast = shadow_paint::Caster { rect: gl.rect, radii: gl.radii, shape: gl.radii, hole: Some(gl.radii[0]), opaque: false, ..cast };
+            let sh = gl.shadow(k_px);
+            shadow_paint::push_shadow(&mut self.instances, &sh, sh.color, &cast);
+        }
         // Shadows keep circular corners; the element's own shapes take the sign, and
         // negative radii draw continuous corners (shader.wgsl `sd_rounded`).
         let radii = if n.vis_flags.continuous_corners() { radii.map(|v| -v) } else { radii };
@@ -455,13 +485,9 @@ impl RuntimeCore {
             let fade = crate::render::pack_fade(fade, clip, clip);
             faded_slot = paint_slots::push_effect(&mut self.instances, (effect, mark), ([r[0], r[1], w, h], radii, clip, fade), k_px, o);
         }
-        let focus_ring = if default_ring == Some(i) || self.forced_default_ring(i) { Some(self.default_focus_ring()) }
-            else if let Some(key) = n.focus.ring_for.as_deref() {
-                n.focus.ring.filter(|_| self.kbd.focus.keyboard() && self.kbd.focus.path().is_some_and(|p| p.rsplit('/').next().is_some_and(|seg| element_path::segment_matches_key(seg, key))))
-            }
-            else if n.focus.within { n.focus.ring.filter(|_| self.focus_within(i) && (!n.focus.within_keyboard || self.kbd.focus.entered_by_keys())) }
-            else { self.focus_ring_visible(i).then_some(n.focus.ring).flatten() };
-        if let Some(ol) = focus_ring.or(n.vis.outline) {
+        if let Some(gl) = &glass {
+            gl.push(&mut self.instances, (k_px, s, sc), o, srgb, clip, fade);
+        } else if let Some(ol) = focus_ring.or(n.vis.outline) {
             let c = if focus_ring.is_some() { ol.color } else { self.color(n.id, P_OUTLINE, ol.color) };
             let ow = pixel_snap::line_width(ol.width * s) * sc;
             let g = pixel_snap::line_width(ol.offset * s) * sc + ow;

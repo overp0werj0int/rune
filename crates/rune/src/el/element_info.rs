@@ -28,6 +28,7 @@ impl Default for ElementInfo {
             fill: Color::TRANSPARENT,
             border_color: None,
             text_color: None,
+            stroke: None,
             text_style: None,
             inset: [0.0; 4],
             text_size: None,

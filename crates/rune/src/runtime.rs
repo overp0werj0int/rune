@@ -151,8 +151,8 @@ use motion::tracks::{SCROLL_DECAY, mark_ancestors, scroll_offsets};
 
 pub(crate) use paint::blend::{apron_key, glyph, icon_inst, premul};
 use paint::{
-    border as border_paint, content as paint_content, exit_mask, keep as paint_keep, pixel_snap,
-    raster_check, shadow as shadow_paint, slots as paint_slots, state as paint_state,
+    border as border_paint, content as paint_content, exit_mask, keep as paint_keep,
+    pixel_snap, raster_check, shadow as shadow_paint, slots as paint_slots, state as paint_state,
     tracks as paint_tracks,
 };
 use paint::cache_layer::{ActiveCache, AnotherFrame, NodeCache, RasterPass, RasterPhase, ScaleSettle};
